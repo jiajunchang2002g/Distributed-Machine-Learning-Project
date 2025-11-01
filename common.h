@@ -2,26 +2,26 @@
 #pragma once
 
 struct Params {
-    int num_data;
-    int num_queries;
-    int num_attrs;
+        int num_data;
+        int num_queries;
+        int num_attrs;
 };
 
 struct DataPoint {
-    int id;
-    int label;                  
-    std::vector<double> attrs; 
+        int id;
+        int label;                  
+        std::vector<double> attrs; 
 };
 
 struct Query {
-    int id;
-    int k;
-    std::vector<double> attrs;         
+        int id;
+        int k;
+        std::vector<double> attrs;         
 };
 
 struct Update {
-    int id;
-    std::vector<double> new_attrs;
+        int id;
+        std::vector<double> new_attrs;
 };
 
 void reportResult(Query &q, std::vector<std::pair<double, int>> &result, int label);

@@ -10,112 +10,112 @@
 Params params;
 
 void parse_params(const std::string &line) {
-    std::stringstream ss(line);
-    ss >> params.num_data >> params.num_queries >> params.num_attrs;
+        std::stringstream ss(line);
+        ss >> params.num_data >> params.num_queries >> params.num_attrs;
 }
 
 DataPoint parse_datapoint(const std::string &line, int gid) {
-    DataPoint p;
-    p.id = gid;
-    std::stringstream ss(line);
-    ss >> p.label;
+        DataPoint p;
+        p.id = gid;
+        std::stringstream ss(line);
+        ss >> p.label;
 
-    double val;
-    for (int i = 0; i < params.num_attrs; i++) {
-        ss >> val;
-        p.attrs.push_back(val);
-    }
-    return p;
+        double val;
+        for (int i = 0; i < params.num_attrs; i++) {
+                ss >> val;
+                p.attrs.push_back(val);
+        }
+        return p;
 }
 
 Query parse_query(const std::string &line, int qid) {
-    Query q;
-    std::stringstream ss(line);
-    q.id = qid;
+        Query q;
+        std::stringstream ss(line);
+        q.id = qid;
 
-    ss >> q.k;
-    
-    double val;
-    for (int i = 0; i < params.num_attrs; i++) {
-        ss >> val;
-        q.attrs.push_back(val);
-    }
-    return q;
+        ss >> q.k;
+
+        double val;
+        for (int i = 0; i < params.num_attrs; i++) {
+                ss >> val;
+                q.attrs.push_back(val);
+        }
+        return q;
 }
 
 Update parse_update(const std::string &line) {
-    Update u;
-    std::stringstream ss(line);
-    ss >> u.id;
-    double val;
-    while (ss >> val) {
-        u.new_attrs.push_back(val);
-    }
-    return u;
+        Update u;
+        std::stringstream ss(line);
+        ss >> u.id;
+        double val;
+        while (ss >> val) {
+                u.new_attrs.push_back(val);
+        }
+        return u;
 }
 
 void reportResult(Query &q, std::vector<std::pair<double, int>> &result, int label) {
 #ifdef DEBUG
-    std::cout << "Label for Query " << q.id << " : " << label << "\n";
-    std::cout << "Top-" << q.k << " neighbors:\n";
-    for (auto &pr : result) {
-        std::cout << pr.second << " : " << pr.first << "\n"; 
-    }
+        std::cout << "Label for Query " << q.id << " : " << label << "\n";
+        std::cout << "Top-" << q.k << " neighbors:\n";
+        for (auto &pr : result) {
+                std::cout << pr.second << " : " << pr.first << "\n"; 
+        }
 #endif
 }
 
 int main(int argc, char **argv) {
-    MPI_Init(&argc, &argv);
+        MPI_Init(&argc, &argv);
 
-    std::ios::sync_with_stdio(false);
-    std::cin.tie(NULL);
+        std::ios::sync_with_stdio(false);
+        std::cin.tie(NULL);
 
-    int rank;
-    MPI_Comm_rank(MPI_COMM_WORLD, &rank);
-    
-    std::vector<DataPoint> dataset;
-    std::vector<Query> queries;
+        int rank;
+        MPI_Comm_rank(MPI_COMM_WORLD, &rank);
 
-    if (rank == 0) {
-        std::string line;
-        std::getline(std::cin, line);
-        parse_params(line);
+        std::vector<DataPoint> dataset;
+        std::vector<Query> queries;
 
-        for (int i = 0; i < params.num_data; i++) {
-            std::getline(std::cin, line);
-            if (line.empty()) {
-                throw std::runtime_error("Line is empty");
-            }
-            dataset.push_back(parse_datapoint(line, i));
+        if (rank == 0) {
+                std::string line;
+                std::getline(std::cin, line);
+                parse_params(line);
+
+                for (int i = 0; i < params.num_data; i++) {
+                        std::getline(std::cin, line);
+                        if (line.empty()) {
+                                throw std::runtime_error("Line is empty");
+                        }
+                        dataset.push_back(parse_datapoint(line, i));
+                }
+
+                for (int i = 0; i < params.num_queries; i++) {
+                        std::getline(std::cin, line);
+                        if (line[0] == 'Q') { 
+                                line = line.substr(1);
+                                Query q = parse_query(line, i);
+                                queries.push_back(q);
+                        } else {
+                                std::cout << line << " " << i << std::endl;
+                                throw std::runtime_error("Line is wrongly formatted");
+                        }
+                }
         }
-        
-        for (int i = 0; i < params.num_queries; i++) {
-            std::getline(std::cin, line);
-            if (line[0] == 'Q') { 
-                line = line.substr(1);
-                Query q = parse_query(line, i);
-                queries.push_back(q);
-            } else {
-                std::cout << line << " " << i << std::endl;
-                throw std::runtime_error("Line is wrongly formatted");
-            }
+
+        MPI_Barrier(MPI_COMM_WORLD);
+
+        Engine eng;
+        std::chrono::_V2::steady_clock::time_point start_time, end_time;
+        if (rank == 0) {
+                start_time = std::chrono::steady_clock::now();
         }
-    }
+        eng.KNN(params, dataset, queries);
+        MPI_Barrier(MPI_COMM_WORLD);
+        if (rank == 0) {
+                end_time = std::chrono::steady_clock::now();
+                std::cerr << "Time taken: " << std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time).count() << " ms\n";
+        }
 
-    MPI_Barrier(MPI_COMM_WORLD);
-
-    Engine eng;
-    std::chrono::_V2::steady_clock::time_point start_time, end_time;
-    if (rank == 0) {
-        start_time = std::chrono::steady_clock::now();
-    }
-    eng.KNN(params, dataset, queries);
-    MPI_Barrier(MPI_COMM_WORLD);
-    if (rank == 0) {
-        end_time = std::chrono::steady_clock::now();
-        std::cerr << "Time taken: " << std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time).count() << " ms\n";
-    }
-
-    MPI_Finalize();
-    return 0;
+        MPI_Finalize();
+        return 0;
 }
