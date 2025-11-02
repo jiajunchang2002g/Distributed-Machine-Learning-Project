@@ -29,9 +29,10 @@ void Engine::KNN(Params &p, vector<DataPoint> &dataset, vector<Query> &queries)
         MPI_Comm_size(comm, &numtasks);
         MPI_Comm_rank(comm, &rank);
 
+        MPI_Bcast(&p, sizeof(Params), MPI_BYTE, 0, comm);
         sendcount = p.num_data / numtasks;
         recvcount = p.num_data / numtasks;
-
+        
         // recvbuffer(s)
         double **attrs_rx = (double **)malloc(sizeof(double *) * recvcount);
         for (int i = 0; i < recvcount; i++)
@@ -65,6 +66,8 @@ void Engine::KNN(Params &p, vector<DataPoint> &dataset, vector<Query> &queries)
                 }
         }
 
+        std::cout << "Rank " << rank << " starting KNN with " << p.num_queries << " queries." << endl;
+        std::cout.flush();
         for (int i = 0; i < p.num_queries; i++)
         {
                 int query_id;
@@ -93,15 +96,30 @@ void Engine::KNN(Params &p, vector<DataPoint> &dataset, vector<Query> &queries)
                 }
                 std::sort(local_results.begin(), local_results.end());
                 std::vector<std::pair<double, int>> knn_results; // distance, id
-                // build a MPI derived datatype to represent tuple<double, int, int>
+
+                /*Build datatype describing structure*/
                 MPI_Datatype tuple_type;
-                int blocklengths[3] = {1, 1, 1};
-                MPI_Aint offsets[3];
-                MPI_Get_address(&std::get<0>(local_results[0]), &offsets[0]);
-                MPI_Get_address(&std::get<1>(local_results[0]), &offsets[1]);
-                MPI_Get_address(&std::get<2>(local_results[0]), &offsets[2]);
                 MPI_Datatype types[3] = {MPI_DOUBLE, MPI_INT, MPI_INT};
-                MPI_Type_create_struct(3, blocklengths, offsets, types, &tuple_type);
+                int blocklengths[3] = {1, 1, 1};
+                // manually compute displacements
+                MPI_Aint disp[3];
+                MPI_Aint base, sizeofentry;
+
+                // Compute displacements
+                MPI_Get_address(&std::get<0>(local_results[0]), &disp[0]);
+                MPI_Get_address(&std::get<1>(local_results[0]), &disp[1]);
+                MPI_Get_address(&std::get<2>(local_results[0]), &disp[2]);
+                base = disp[0];
+                for (i=0; i < 3; i++) disp[i] = MPI_Aint_diff(disp[i], base);
+
+                MPI_Type_create_struct(3, blocklengths, disp, types, &tuple_type);
+
+                /*Compute extent of the structure*/
+                MPI_Get_address(local_results.data() + 1, &sizeofentry);
+                sizeofentry = MPI_Aint_diff(sizeofentry, base);
+
+                /*Build datatype describing structure*/
+                MPI_Type_create_resized(tuple_type, 0, sizeofentry, &tuple_type);
                 MPI_Type_commit(&tuple_type);
 
                 std::vector<std::tuple<double, int, int>> best_local_results;
@@ -112,6 +130,20 @@ void Engine::KNN(Params &p, vector<DataPoint> &dataset, vector<Query> &queries)
                 MPI_Gather(&local_results[0], query_k * sizeof(std::tuple<double, int, int>), tuple_type,
                            &best_local_results[0], query_k * sizeof(std::tuple<double, int, int>), tuple_type,
                            0, comm);
+                MPI_Type_free(&tuple_type);
+                std::cout << "Rank " << rank << " finished gathering for query " << query_id << endl;
+                // print best local results
+                if (rank == 0)
+                {
+                        std::cout << "Best local results for query " << query_id << ":" << std::endl;
+                        for (int j = 0; j < numtasks * query_k; j++)
+                        {
+                                std::cout << "Distance: " << std::get<0>(best_local_results[j])
+                                          << ", Label: " << std::get<1>(best_local_results[j])
+                                          << ", ID: " << std::get<2>(best_local_results[j]) << std::endl;
+                        }
+                }
+                std::cout.flush();
                 if (rank == 0)
                 {
                         std::sort(best_local_results.begin(), best_local_results.end());
@@ -137,5 +169,4 @@ void Engine::KNN(Params &p, vector<DataPoint> &dataset, vector<Query> &queries)
                         reportResult(queries[i], knn_results, most_frequent_label);
                 }
         }
-        printf("rank= %d \n", rank);
 }
