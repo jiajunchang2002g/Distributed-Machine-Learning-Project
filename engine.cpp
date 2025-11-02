@@ -27,6 +27,7 @@ void Engine::KNN(Params &p, std::vector<DataPoint> &dataset, std::vector<Query> 
         MPI_Comm_size(comm, &numtasks);
         MPI_Comm_rank(comm, &rank);
 
+        // Broadcast parameters
         if (rank == 0)
         {
                 num_attrs = p.num_attrs;
@@ -40,8 +41,6 @@ void Engine::KNN(Params &p, std::vector<DataPoint> &dataset, std::vector<Query> 
         sendcount = num_data / numtasks;
         recvcount = num_data / numtasks;
 
-        // std::cout << "Rank " << rank << " will sendcount: " << sendcount << ", recvcount: " << recvcount << std::endl;
-
         // recvbuffer(s)
         double **attrs_rx = (double **)malloc(sizeof(double *) * recvcount);
         for (int i = 0; i < recvcount; i++)
@@ -50,7 +49,6 @@ void Engine::KNN(Params &p, std::vector<DataPoint> &dataset, std::vector<Query> 
         }
         int *id_rx = (int *)malloc(sizeof(int) * recvcount);
         int *label_rx = (int *)malloc(sizeof(int) * recvcount);
-        double **q_attrs_rx = (double **)malloc(sizeof(double *) * num_attrs);
 
         // sendbuffers(s)
         double **attrs_tx;
@@ -74,6 +72,7 @@ void Engine::KNN(Params &p, std::vector<DataPoint> &dataset, std::vector<Query> 
                         attrs_tx[i] = dataset[i].attrs.data();
                 }
         }
+        MPI_Barrier(comm); // Ensure sendbuffer(s) initialized before scatter
 
         /*Build datatype describing structure*/
         struct tuple
@@ -101,8 +100,6 @@ void Engine::KNN(Params &p, std::vector<DataPoint> &dataset, std::vector<Query> 
         MPI_Type_create_struct(3, blocklengths, disp, types, &tuple_type);
         MPI_Type_commit(&tuple_type);
 
-        // std::cout << "Rank " << rank << " starting KNN computation" << std::endl;
-
         for (int i = 0; i < num_queries; i++)
         {
                 int query_id;
@@ -118,15 +115,10 @@ void Engine::KNN(Params &p, std::vector<DataPoint> &dataset, std::vector<Query> 
                 MPI_Bcast(&query_k, 1, MPI_INT, 0, comm);
                 MPI_Bcast(query_attrs, num_attrs, MPI_DOUBLE, 0, comm);
 
-                // std::cout << "Rank " << rank << " finished bcast for query " << query_id << std::endl;
-
                 MPI_Scatter(id_tx, sendcount, MPI_INT, id_rx, recvcount, MPI_INT, 0, comm);
-                // std::cout << "Rank " << rank << " finished scattering for id " << query_id << std::endl;
                 MPI_Scatter(label_tx, sendcount, MPI_INT, label_rx, recvcount, MPI_INT, 0, comm);
-                std::cout << "Rank " << rank << " finished scattering for label " << query_id << std::endl;
-                MPI_Scatter(attrs_tx[0], sendcount * num_attrs, MPI_DOUBLE,
-                            attrs_rx[0], recvcount * num_attrs, MPI_DOUBLE, 0, comm);
-                std::cout << "Rank " << rank << " finished scattering for attrs " << query_id << std::endl;
+                MPI_Scatter(attrs_tx, sendcount * num_attrs, MPI_DOUBLE,
+                            attrs_rx, recvcount * num_attrs, MPI_DOUBLE, 0, comm);
 
                 std::vector<tuple> local_results; // distance, label, id
                 for (int j = 0; j < recvcount; j++)
@@ -150,12 +142,12 @@ void Engine::KNN(Params &p, std::vector<DataPoint> &dataset, std::vector<Query> 
                 }
                 std::cout << "Rank " << rank << " starting gathering for query " << query_id << std::endl;
                 MPI_Barrier(comm);
-                
+
                 MPI_Gather(local_results.data(), query_k, tuple_type,
                            best_local_results.data(), query_k, tuple_type,
                            0, comm);
 
-                std::cout << "Rank " << rank << " finished gathering for query " << query_id << std::endl;
+                // std::cout << "Rank " << rank << " finished gathering for query " << query_id << std::endl;
                 // print best local results
                 if (rank == 0)
                 {

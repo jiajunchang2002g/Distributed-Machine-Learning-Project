@@ -12,4 +12,8 @@ engine: engine.cpp common.cpp
 	${CPP} ${CPPFLAGS} $^ -o $@
 
 engine.debug: engine.cpp common.cpp
-	${CPP} ${CPPFLAGS} -g -DDEBUG $^ -o $@
+	${CPP} ${CPPFLAGS} -g -Wall -DDEBUG $^ -o $@
+
+# debug target
+debug: engine.debug
+	@echo "Debug build complete: engine.debug"
