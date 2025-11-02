@@ -8,8 +8,6 @@
 
 #include <mpi.h>
 
-using namespace std;
-
 double computeDistance(double *a, double *b, int dim)
 {
         double sum = 0.0;
@@ -20,7 +18,7 @@ double computeDistance(double *a, double *b, int dim)
         return sum;
 }
 
-void Engine::KNN(Params &p, vector<DataPoint> &dataset, vector<Query> &queries)
+void Engine::KNN(Params &p, std::vector<DataPoint> &dataset, std::vector<Query> &queries)
 {
         int numtasks, rank, dest, src, rc, count, tag = 1;
         int num_attrs, num_queries, num_data, sendcount, recvcount;
@@ -42,9 +40,9 @@ void Engine::KNN(Params &p, vector<DataPoint> &dataset, vector<Query> &queries)
         sendcount = num_data / numtasks;
         recvcount = num_data / numtasks;
 
-        cout << "Rank " << rank << " will sendcount: " << sendcount << ", recvcount: " << recvcount << endl;
-        cout.flush();
-        
+        std::cout << "Rank " << rank << " will sendcount: " << sendcount << ", recvcount: " << recvcount << std::endl;
+        std::cout.flush();
+
         // recvbuffer(s)
         double **attrs_rx = (double **)malloc(sizeof(double *) * recvcount);
         for (int i = 0; i < recvcount; i++)
@@ -78,10 +76,18 @@ void Engine::KNN(Params &p, vector<DataPoint> &dataset, vector<Query> &queries)
                 }
         }
 
-        std::cout << "Rank " << rank << " starting KNN with " << num_queries << " queries." << endl;
+        std::cout << "Rank " << rank << " starting KNN with " << num_queries << " queries." << std::endl;
         std::cout.flush();
+
+        struct tuple {
+                double distance;
+                int label;
+                int id;
+        };
+
         for (int i = 0; i < num_queries; i++)
         {
+                /* Broadcast query */
                 int query_id;
                 int query_k;
                 double *query_attrs = (double *)malloc(sizeof(double) * num_attrs);
@@ -95,17 +101,19 @@ void Engine::KNN(Params &p, vector<DataPoint> &dataset, vector<Query> &queries)
                 MPI_Bcast(&query_k, 1, MPI_INT, 0, comm);
                 MPI_Bcast(query_attrs, num_attrs, MPI_DOUBLE, 0, comm);
 
+                /* Scatter data points */
                 MPI_Scatter(id_tx, sendcount, MPI_INT, id_rx, recvcount, MPI_INT, 0, comm);
                 MPI_Scatter(label_tx, sendcount, MPI_INT, label_rx, recvcount, MPI_INT, 0, comm);
                 MPI_Scatter(attrs_tx[0], sendcount * num_attrs, MPI_DOUBLE,
                             attrs_rx[0], recvcount * num_attrs, MPI_DOUBLE, 0, comm);
 
-                std::vector<std::tuple<double, int, int>> local_results; // distance, label, id
+                std::vector<tuple> local_results; // distance, label, id
                 for (int j = 0; j < recvcount; j++)
                 {
                         double dist = computeDistance(query_attrs, attrs_rx[j], num_attrs);
-                        local_results.push_back(std::make_tuple(dist, label_rx[j], id_rx[j]));
+                        local_results.push_back({dist, label_rx[j], id_rx[j]});
                 }
+                // TODO: sort by smallest distance, break ties with larger label
                 std::sort(local_results.begin(), local_results.end());
                 std::vector<std::pair<double, int>> knn_results; // distance, id
 
@@ -113,14 +121,13 @@ void Engine::KNN(Params &p, vector<DataPoint> &dataset, vector<Query> &queries)
                 MPI_Datatype tuple_type;
                 MPI_Datatype types[3] = {MPI_DOUBLE, MPI_INT, MPI_INT};
                 int blocklengths[3] = {1, 1, 1};
-                // manually compute displacements
                 MPI_Aint disp[3];
                 MPI_Aint base, sizeofentry;
 
                 // Compute displacements
-                MPI_Get_address(&std::get<0>(local_results[0]), &disp[0]);
-                MPI_Get_address(&std::get<1>(local_results[0]), &disp[1]);
-                MPI_Get_address(&std::get<2>(local_results[0]), &disp[2]);
+                MPI_Get_address(local_results.data(), &disp[0]);
+                MPI_Get_address(&local_results[0].label, &disp[1]);
+                MPI_Get_address(&local_results[0].id, &disp[2]);
                 base = disp[0];
                 for (i=0; i < 3; i++) disp[i] = MPI_Aint_diff(disp[i], base);
 
@@ -134,25 +141,26 @@ void Engine::KNN(Params &p, vector<DataPoint> &dataset, vector<Query> &queries)
                 MPI_Type_create_resized(tuple_type, 0, sizeofentry, &tuple_type);
                 MPI_Type_commit(&tuple_type);
 
-                std::vector<std::tuple<double, int, int>> best_local_results;
+                std::vector<tuple> best_local_results;
                 if (rank == 0)
                 {
                         best_local_results.resize(numtasks * query_k);
                 }
-                MPI_Gather(&local_results[0], query_k * sizeof(std::tuple<double, int, int>), tuple_type,
-                           &best_local_results[0], query_k * sizeof(std::tuple<double, int, int>), tuple_type,
+                // TODO: Fix faulty gather
+                MPI_Gather(local_results.data(), query_k * sizeof(tuple), tuple_type,
+                           best_local_results.data(), query_k * sizeof(tuple), tuple_type,
                            0, comm);
                 MPI_Type_free(&tuple_type);
-                std::cout << "Rank " << rank << " finished gathering for query " << query_id << endl;
+                std::cout << "Rank " << rank << " finished gathering for query " << query_id << std::endl;
                 // print best local results
                 if (rank == 0)
                 {
                         std::cout << "Best local results for query " << query_id << ":" << std::endl;
                         for (int j = 0; j < numtasks * query_k; j++)
                         {
-                                std::cout << "Distance: " << std::get<0>(best_local_results[j])
-                                          << ", Label: " << std::get<1>(best_local_results[j])
-                                          << ", ID: " << std::get<2>(best_local_results[j]) << std::endl;
+                                std::cout << "Distance: " << best_local_results[j].distance
+                                          << ", Label: " << best_local_results[j].label
+                                          << ", ID: " << best_local_results[j].id << std::endl;
                         }
                 }
                 std::cout.flush();
@@ -163,8 +171,8 @@ void Engine::KNN(Params &p, vector<DataPoint> &dataset, vector<Query> &queries)
                         std::unordered_map<int, int> label_count;
                         for (int i = 0; i < query_k; i++)
                         {
-                                knn_results.push_back(std::make_pair(std::get<0>(best_local_results[i]), std::get<2>(best_local_results[i])));
-                                label_count[std::get<1>(best_local_results[i])]++;
+                                knn_results.push_back(std::make_pair(best_local_results[i].distance, best_local_results[i].id));
+                                label_count[best_local_results[i].label]++;
                         }
                         // pick most frequent label
                         int max_count = 0;
