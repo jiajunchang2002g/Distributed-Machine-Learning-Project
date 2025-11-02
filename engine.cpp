@@ -1,5 +1,4 @@
 #include <vector>
-#include <tuple>
 #include <unordered_map>
 #include <queue>
 #include <algorithm>
@@ -7,74 +6,52 @@
 #include <cmath>
 #include "engine.h"
 
+#include <mpi.h>
+
 using namespace std;
 
-double Engine::computeDistance(const vector<double> &pointA,
-                const vector<double> &pointB) {
-        double sum = 0.0;
-        for (size_t i = 0; i < pointA.size(); ++i) {
-                double diff = pointA[i] - pointB[i];
-                sum += diff * diff;
-        }
-        return sum;
-}
 
 void Engine::KNN(Params &p, vector<DataPoint> &dataset, vector<Query> &queries) {
-        for (auto &query : queries) {
 
-                // 1. Max-heap of (dist, label, id)
-                priority_queue<tuple<double, int, int>,
-                vector<tuple<double, int, int>>,
-                CompareDist> heap;
+        int numtasks, rank, dest, src, rc, count, tag=1;
+        int sendcount, recvcount;
+        MPI_Comm comm = MPI_COMM_WORLD;
+        MPI_Status Stat;
+        MPI_Comm_size(comm, &numtasks);
+        MPI_Comm_rank(comm, &rank);
 
-                for (size_t i = 0; i < dataset.size(); ++i) {
-                        double dist = computeDistance(dataset[i].attrs, query.attrs);
-                        int label = dataset[i].label;
-                        int id = static_cast<int>(i);
+        sendcount = p.num_data / numtasks;
+        recvcount = p.num_data / numtasks;
 
-                        if (heap.size() < query.k) {
-                                heap.push({dist, label, id});
-                        } else if (dist < get<0>(heap.top()) ||
-                                        (dist == get<0>(heap.top()) && label > get<1>(heap.top()))) {
-                                heap.pop();
-                                heap.push({dist, label, id});
-                        }
+        std::vector<int> id_in(recvcount); 
+        std::vector<int> label_in(recvcount);
+        std::vector<std::vector<double>> attrs_in(recvcount);
+        std::vector<int> id_out;
+        std::vector<int> label_out;
+        std::vector<std::vector<double>> attrs_out;
+
+        if (0 == rank) {
+                id_out.resize(p.num_data); 
+                label_out.resize(p.num_data); 
+                attrs_out.resize(p.num_data);
+                for (int i = 0; i < p.num_data; i++) {
+                        id_out[i] = dataset[i].id;
+                        label_out[i] = dataset[i].label;
+                        attrs_out[i].resize(p.num_attrs); 
+                        attrs_out[i] = dataset[i].attrs;
                 }
+        }
 
-                vector<std::pair<double, int>> result;  
-                while (!heap.empty()) {
-                        auto t = heap.top();
-                        result.push_back({get<0>(t), get<2>(t)}); 
-                        heap.pop();
-                }
+        if (0 == rank) {
+                MPI_Scatter(id_out.data(), sendcount, MPI_INT, id_in.data(), recvcount, MPI_INT, src, comm);
+        } else {
+                MPI_Scatter(nullptr, sendcount, MPI_INT, id_in.data(), recvcount, MPI_INT, src, comm);
+        }
+        // MPI_Scatter(attrs_out.data(), p.num_data, MPI_DOUBLE, attrs_in.data(), p.num_attrs, MPI_DOUBLE, src, comm);
+        // MPI_Scatter(label_out.data(), p.num_data, MPI_INT, label_in.data(), p.num_data, MPI_INT, src, comm);
 
-                // 3. Sort result by id
-                sort(result.begin(), result.end(),
-                                [](const pair<double,int> &a, const pair<double,int> &b) {
-                                return a.second < b.second;
-                                });
-
-                // 4. Count label frequencies to assign query label
-                unordered_map<int,int> freqs;
-                for (auto &t : result) {  
-                        int label = get<1>(t);
-                        freqs[label]++;
-                }
-
-                // 5. Manually pick most frequent label
-                int best_label = -1;
-                int best_count = -1;
-                for (auto &entry : freqs) {
-                        if (entry.second > best_count) {
-                                best_count = entry.second;
-                                best_label = entry.first;
-                        } else if (entry.second == best_count && entry.first < best_label) {
-                                best_label = entry.first;
-                        }
-                }
-
-                // 6. Report results
-                reportResult(query, result, best_label);
+        if (0 == rank) {
+                printf("rank= %d  Ids: %d %d %d %d\n",rank,id_in[0],id_in[1],id_in[2],id_in[3]);
+                printf("rank= %d  Labels: %d %d %d %d\n",rank,label_in[0],label_in[1],label_in[2],label_in[3]);
         }
 }
-
