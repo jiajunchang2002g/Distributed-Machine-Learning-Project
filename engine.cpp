@@ -41,7 +41,6 @@ void Engine::KNN(Params &p, std::vector<DataPoint> &dataset, std::vector<Query> 
         recvcount = num_data / numtasks;
 
         std::cout << "Rank " << rank << " will sendcount: " << sendcount << ", recvcount: " << recvcount << std::endl;
-        std::cout.flush();
 
         // recvbuffer(s)
         double **attrs_rx = (double **)malloc(sizeof(double *) * recvcount);
@@ -76,15 +75,31 @@ void Engine::KNN(Params &p, std::vector<DataPoint> &dataset, std::vector<Query> 
                 }
         }
 
-        std::cout << "Rank " << rank << " starting KNN with " << num_queries << " queries." << std::endl
-                  << std::flush;
-
+        /*Build datatype describing structure*/
         struct tuple
         {
                 double distance;
                 int label;
                 int id;
         };
+        tuple example_tuple = {0.0, 0, 0};
+        MPI_Datatype tuple_type;
+        MPI_Datatype types[3] = {MPI_DOUBLE, MPI_INT, MPI_INT};
+        int blocklengths[3] = {1, 1, 1};
+        MPI_Aint disp[3];
+
+        MPI_Get_address(&example_tuple.distance, &disp[0]);
+        MPI_Get_address(&example_tuple.label, &disp[1]);
+        MPI_Get_address(&example_tuple.id, &disp[2]);
+
+        MPI_Aint base = disp[0];
+        for (int i = 0; i < 3; i++)
+        {
+                disp[i] -= base;
+        }
+
+        MPI_Type_create_struct(3, blocklengths, disp, types, &tuple_type);
+        MPI_Type_commit(&tuple_type);
 
         for (int i = 0; i < num_queries; i++)
         {
@@ -106,6 +121,8 @@ void Engine::KNN(Params &p, std::vector<DataPoint> &dataset, std::vector<Query> 
                 MPI_Scatter(attrs_tx[0], sendcount * num_attrs, MPI_DOUBLE,
                             attrs_rx[0], recvcount * num_attrs, MPI_DOUBLE, 0, comm);
 
+                std::cout << "Rank " << rank << " finished scattering for query " << query_id << std::endl;
+
                 std::vector<tuple> local_results; // distance, label, id
                 for (int j = 0; j < recvcount; j++)
                 {
@@ -120,32 +137,16 @@ void Engine::KNN(Params &p, std::vector<DataPoint> &dataset, std::vector<Query> 
                           });
                 std::vector<std::pair<double, int>> knn_results; // distance, id
 
-                /*Build datatype describing structure*/
-                MPI_Datatype tuple_type;
-                MPI_Datatype types[3] = {MPI_DOUBLE, MPI_INT, MPI_INT};
-                int blocklengths[3] = {1, 1, 1};
-                MPI_Aint disp[3];
-
-                MPI_Get_address(&local_results[0].distance, &disp[0]);
-                MPI_Get_address(&local_results[0].label, &disp[1]);
-                MPI_Get_address(&local_results[0].id, &disp[2]);
-
-                MPI_Aint base = disp[0];
-                for (int i = 0; i < 3; i++)
-                        disp[i] -= base;
-
-                MPI_Type_create_struct(3, blocklengths, disp, types, &tuple_type);
-                MPI_Type_commit(&tuple_type);
-
                 std::vector<tuple> best_local_results;
                 if (rank == 0)
                 {
                         best_local_results.resize(numtasks * query_k);
                 }
+
                 MPI_Gather(local_results.data(), query_k, tuple_type,
                            best_local_results.data(), query_k, tuple_type,
                            0, comm);
-                MPI_Type_free(&tuple_type);
+
                 std::cout << "Rank " << rank << " finished gathering for query " << query_id << std::endl;
                 std::cout.flush();
                 // print best local results
