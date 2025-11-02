@@ -6,7 +6,5 @@ Rank 2 will sendcount: 250, recvcount: 250
 Rank 2 starting KNN with 1 queries.
 Rank 3 will sendcount: 250, recvcount: 250
 Rank 3 starting KNN with 1 queries.
-Rank 1 scatter success 250
-Rank 2 scatter success 250
-Rank 3 scatter success 250
-Rank 0 scatter success 250
+Rank 1 finished gathering for query 0
+Rank 3 finished gathering for query 0

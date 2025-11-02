@@ -76,8 +76,7 @@ void Engine::KNN(Params &p, std::vector<DataPoint> &dataset, std::vector<Query> 
                 }
         }
 
-        std::cout << "Rank " << rank << " starting KNN with " << num_queries << " queries." << std::endl;
-        std::cout.flush();
+        std::cout << "Rank " << rank << " starting KNN with " << num_queries << " queries." << std::endl << std::flush;
 
         struct tuple {
                 double distance;
@@ -144,11 +143,12 @@ void Engine::KNN(Params &p, std::vector<DataPoint> &dataset, std::vector<Query> 
                 {
                         best_local_results.resize(numtasks * query_k);
                 }
-                MPI_Gather(local_results.data(), query_k * sizeof(tuple), tuple_type,
-                           best_local_results.data(), query_k * sizeof(tuple), tuple_type,
+                MPI_Gather(local_results.data(), query_k, tuple_type,
+                           best_local_results.data(), query_k, tuple_type,
                            0, comm);
                 MPI_Type_free(&tuple_type);
                 std::cout << "Rank " << rank << " finished gathering for query " << query_id << std::endl;
+                std::cout.flush();
                 // print best local results
                 if (rank == 0)
                 {
@@ -160,7 +160,6 @@ void Engine::KNN(Params &p, std::vector<DataPoint> &dataset, std::vector<Query> 
                                           << ", ID: " << best_local_results[j].id << std::endl;
                         }
                 }
-                std::cout.flush();
                 if (rank == 0)
                 {
                         std::sort(best_local_results.begin(), best_local_results.end(), [](const tuple &a, const tuple &b) {
@@ -185,7 +184,7 @@ void Engine::KNN(Params &p, std::vector<DataPoint> &dataset, std::vector<Query> 
                                         most_frequent_label = pair.first;
                                 }
                         }
-                        
+
                         std::sort(knn_results.begin(), knn_results.end(), [](const std::pair<double, int> &a, const std::pair<double, int> &b) {
                                 if (a.first == b.first)
                                         return a.second > b.second; // larger id first
