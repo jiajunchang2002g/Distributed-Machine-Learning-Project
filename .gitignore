@@ -1,1 +1,8 @@
 inputs/
+.vscode
+test.in
+test.out
+*.o
+*.exe
+*.log
+*.tmp
