@@ -87,7 +87,6 @@ void Engine::KNN(Params &p, std::vector<DataPoint> &dataset, std::vector<Query> 
 
         for (int i = 0; i < num_queries; i++)
         {
-                /* Broadcast query */
                 int query_id;
                 int query_k;
                 double *query_attrs = (double *)malloc(sizeof(double) * num_attrs);
@@ -101,7 +100,6 @@ void Engine::KNN(Params &p, std::vector<DataPoint> &dataset, std::vector<Query> 
                 MPI_Bcast(&query_k, 1, MPI_INT, 0, comm);
                 MPI_Bcast(query_attrs, num_attrs, MPI_DOUBLE, 0, comm);
 
-                /* Scatter data points */
                 MPI_Scatter(id_tx, sendcount, MPI_INT, id_rx, recvcount, MPI_INT, 0, comm);
                 MPI_Scatter(label_tx, sendcount, MPI_INT, label_rx, recvcount, MPI_INT, 0, comm);
                 MPI_Scatter(attrs_tx[0], sendcount * num_attrs, MPI_DOUBLE,
@@ -113,8 +111,11 @@ void Engine::KNN(Params &p, std::vector<DataPoint> &dataset, std::vector<Query> 
                         double dist = computeDistance(query_attrs, attrs_rx[j], num_attrs);
                         local_results.push_back({dist, label_rx[j], id_rx[j]});
                 }
-                // TODO: sort by smallest distance, break ties with larger label
-                std::sort(local_results.begin(), local_results.end());
+                std::sort(local_results.begin(), local_results.end(), [](const tuple &a, const tuple &b) {
+                        if (a.distance == b.distance)
+                                return a.label > b.label; // larger label first
+                        return a.distance < b.distance;   // smaller distance first
+                });
                 std::vector<std::pair<double, int>> knn_results; // distance, id
 
                 /*Build datatype describing structure*/
@@ -124,7 +125,6 @@ void Engine::KNN(Params &p, std::vector<DataPoint> &dataset, std::vector<Query> 
                 MPI_Aint disp[3];
                 MPI_Aint base, sizeofentry;
 
-                // Compute displacements
                 MPI_Get_address(local_results.data(), &disp[0]);
                 MPI_Get_address(&local_results[0].label, &disp[1]);
                 MPI_Get_address(&local_results[0].id, &disp[2]);
@@ -133,11 +133,9 @@ void Engine::KNN(Params &p, std::vector<DataPoint> &dataset, std::vector<Query> 
 
                 MPI_Type_create_struct(3, blocklengths, disp, types, &tuple_type);
 
-                /*Compute extent of the structure*/
                 MPI_Get_address(local_results.data() + 1, &sizeofentry);
                 sizeofentry = MPI_Aint_diff(sizeofentry, base);
 
-                /*Build datatype describing structure*/
                 MPI_Type_create_resized(tuple_type, 0, sizeofentry, &tuple_type);
                 MPI_Type_commit(&tuple_type);
 
@@ -146,7 +144,6 @@ void Engine::KNN(Params &p, std::vector<DataPoint> &dataset, std::vector<Query> 
                 {
                         best_local_results.resize(numtasks * query_k);
                 }
-                // TODO: Fix faulty gather
                 MPI_Gather(local_results.data(), query_k * sizeof(tuple), tuple_type,
                            best_local_results.data(), query_k * sizeof(tuple), tuple_type,
                            0, comm);
@@ -166,7 +163,11 @@ void Engine::KNN(Params &p, std::vector<DataPoint> &dataset, std::vector<Query> 
                 std::cout.flush();
                 if (rank == 0)
                 {
-                        std::sort(best_local_results.begin(), best_local_results.end());
+                        std::sort(best_local_results.begin(), best_local_results.end(), [](const tuple &a, const tuple &b) {
+                                if (a.distance == b.distance)
+                                        return a.label > b.label; // larger label first
+                                return a.distance < b.distance;   // smaller distance first
+                        });
                         int most_frequent_label = -1;
                         std::unordered_map<int, int> label_count;
                         for (int i = 0; i < query_k; i++)
@@ -174,7 +175,7 @@ void Engine::KNN(Params &p, std::vector<DataPoint> &dataset, std::vector<Query> 
                                 knn_results.push_back(std::make_pair(best_local_results[i].distance, best_local_results[i].id));
                                 label_count[best_local_results[i].label]++;
                         }
-                        // pick most frequent label
+
                         int max_count = 0;
                         for (auto &pair : label_count)
                         {
@@ -184,8 +185,12 @@ void Engine::KNN(Params &p, std::vector<DataPoint> &dataset, std::vector<Query> 
                                         most_frequent_label = pair.first;
                                 }
                         }
-                        // sort results
-                        sort(knn_results.begin(), knn_results.end());
+                        
+                        std::sort(knn_results.begin(), knn_results.end(), [](const std::pair<double, int> &a, const std::pair<double, int> &b) {
+                                if (a.first == b.first)
+                                        return a.second > b.second; // larger id first
+                                return a.first < b.first;   // smaller distance first
+                        });
                         reportResult(queries[i], knn_results, most_frequent_label);
                 }
         }
