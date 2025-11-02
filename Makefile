@@ -12,4 +12,4 @@ engine: engine.cpp common.cpp
 	${CPP} ${CPPFLAGS} $^ -o $@
 
 engine.debug: engine.cpp common.cpp
-	${CPP} ${CPPFLAGS} -DDEBUG $^ -o $@
+	${CPP} ${CPPFLAGS} -g -DDEBUG $^ -o $@
