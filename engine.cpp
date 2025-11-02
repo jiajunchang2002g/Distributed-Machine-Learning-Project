@@ -1,19 +1,24 @@
 #include <vector>
-#include <unordered_map>
-#include <queue>
-#include <algorithm>
 #include <iostream>
-#include <cmath>
 #include "engine.h"
 
 #include <mpi.h>
 
 using namespace std;
 
+double computeDistance(double *a, double *b, int dim)
+{
+        double sum = 0.0;
+        for (int i = 0; i < dim; i++)
+        {
+                sum += (a[i] - b[i]) * (a[i] - b[i]);
+        }
+        return sum;
+}
 
-void Engine::KNN(Params &p, vector<DataPoint> &dataset, vector<Query> &queries) {
-
-        int numtasks, rank, dest, src, rc, count, tag=1;
+void Engine::KNN(Params &p, vector<DataPoint> &dataset, vector<Query> &queries)
+{
+        int numtasks, rank, dest, src, rc, count, tag = 1;
         int sendcount, recvcount;
         MPI_Comm comm = MPI_COMM_WORLD;
         MPI_Status Stat;
@@ -23,35 +28,60 @@ void Engine::KNN(Params &p, vector<DataPoint> &dataset, vector<Query> &queries) 
         sendcount = p.num_data / numtasks;
         recvcount = p.num_data / numtasks;
 
-        std::vector<int> id_in(recvcount); 
-        std::vector<int> label_in(recvcount);
-        std::vector<std::vector<double>> attrs_in(recvcount);
-        std::vector<int> id_out;
-        std::vector<int> label_out;
-        std::vector<std::vector<double>> attrs_out;
+        // recvbuffer(s)
+        double **attrs_rx = (double **)malloc(sizeof(double *) * recvcount);
+        for (int i = 0; i < recvcount; i++)
+        {
+                attrs_rx[i] = (double *)malloc(sizeof(double) * p.num_attrs);
+        }
+        int *id_rx = (int *)malloc(sizeof(int) * recvcount);
+        int *label_rx = (int *)malloc(sizeof(int) * recvcount);
+        double **q_attrs_rx = (double **)malloc(sizeof(double *) * p.num_attrs);
 
-        if (0 == rank) {
-                id_out.resize(p.num_data); 
-                label_out.resize(p.num_data); 
-                attrs_out.resize(p.num_data);
-                for (int i = 0; i < p.num_data; i++) {
-                        id_out[i] = dataset[i].id;
-                        label_out[i] = dataset[i].label;
-                        attrs_out[i].resize(p.num_attrs); 
-                        attrs_out[i] = dataset[i].attrs;
+        // sendbuffers(s)
+        double **attrs_tx;
+        int *id_tx;
+        int *label_tx;
+        if (rank == 0)
+        {
+                attrs_tx = (double **)malloc(sizeof(double *) * sendcount);
+                for (int i = 0; i < sendcount; i++)
+                {
+                        attrs_tx[i] = (double *)malloc(sizeof(double) * p.num_attrs);
+                }
+                id_tx = (int *)malloc(sizeof(int) * sendcount);
+                label_tx = (int *)malloc(sizeof(int) * sendcount);
+
+                // prepare send buffers
+                for (int i = 0; i < sendcount; i++)
+                {
+                        id_tx[i] = dataset[i].id;
+                        label_tx[i] = dataset[i].label;
+                        attrs_tx[i] = dataset[i].attrs.data();
                 }
         }
 
-        if (0 == rank) {
-                MPI_Scatter(id_out.data(), sendcount, MPI_INT, id_in.data(), recvcount, MPI_INT, src, comm);
-        } else {
-                MPI_Scatter(nullptr, sendcount, MPI_INT, id_in.data(), recvcount, MPI_INT, src, comm);
-        }
-        // MPI_Scatter(attrs_out.data(), p.num_data, MPI_DOUBLE, attrs_in.data(), p.num_attrs, MPI_DOUBLE, src, comm);
-        // MPI_Scatter(label_out.data(), p.num_data, MPI_INT, label_in.data(), p.num_data, MPI_INT, src, comm);
+        for (int i = 0; i < p.num_queries; i++)
+        {
+                int query_id;
+                int query_k;
+                double *query_attrs = (double *)malloc(sizeof(double) * p.num_attrs);
+                if (rank == 0)
+                {
+                        query_id = queries[i].id;
+                        query_k = queries[i].k;
+                        query_attrs = queries[i].attrs.data();
+                }
+                MPI_Bcast(&query_id, 1, MPI_INT, 0, comm);
+                MPI_Bcast(&query_k, 1, MPI_INT, 0, comm);
+                MPI_Bcast(query_attrs, p.num_attrs, MPI_DOUBLE, 0, comm);
 
-        if (0 == rank) {
-                printf("rank= %d  Ids: %d %d %d %d\n",rank,id_in[0],id_in[1],id_in[2],id_in[3]);
-                printf("rank= %d  Labels: %d %d %d %d\n",rank,label_in[0],label_in[1],label_in[2],label_in[3]);
+                MPI_Scatter(id_tx, sendcount, MPI_INT, id_rx, recvcount, MPI_INT, 0, comm);
+                MPI_Scatter(label_tx, sendcount, MPI_INT, label_rx, recvcount, MPI_INT, 0, comm);
+                MPI_Scatter(attrs_tx[0], sendcount * p.num_attrs, MPI_DOUBLE,
+                            attrs_rx[0], recvcount * p.num_attrs, MPI_DOUBLE, 0, comm);
+                
+                
         }
+        printf("rank= %d \n", rank);
 }
