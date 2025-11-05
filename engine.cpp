@@ -44,9 +44,10 @@ void Engine::KNN(Params &p, std::vector<DataPoint> &dataset, std::vector<Query> 
 
         // recvbuffer(s)
         double **attrs_rx = (double **)malloc(sizeof(double *) * recvcount);
+        void *temp_rx = malloc(sizeof(double) * recvcount * num_attrs);
         for (int i = 0; i < recvcount; i++)
         {
-                attrs_rx[i] = (double *)malloc(sizeof(double) * num_attrs);
+                attrs_rx[i] = (double *)temp_rx + sizeof(double) * i * num_attrs;
         }
         int *id_rx = (int *)malloc(sizeof(int) * recvcount);
         int *label_rx = (int *)malloc(sizeof(int) * recvcount);
@@ -58,10 +59,10 @@ void Engine::KNN(Params &p, std::vector<DataPoint> &dataset, std::vector<Query> 
         if (rank == 0)
         {
                 attrs_tx = (double **)malloc(sizeof(double *) * num_data);
-                void *temp = malloc(sizeof(double) * num_data * num_attrs);
+                void *temp_tx = malloc(sizeof(double) * num_data * num_attrs);
                 for (int i = 0; i < num_data; i++)
                 {
-                        attrs_tx[i] = (double *)temp + sizeof(double) * i * num_attrs;
+                        attrs_tx[i] = (double *)temp_tx + sizeof(double) * i * num_attrs;
                 }
                 id_tx = (int *)malloc(sizeof(int) * num_data);
                 label_tx = (int *)malloc(sizeof(int) * num_data);
