@@ -9,3 +9,4 @@ build/
 mytest.*
 test.in
 test.out
+engine.debug

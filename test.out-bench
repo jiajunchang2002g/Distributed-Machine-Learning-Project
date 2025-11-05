@@ -1,4 +1,4 @@
-Label for Query 0 : 1
+Label for Query 0 : 4
 Top-10 neighbors:
 17 : 32134.1
 7 : 35425
@@ -10,7 +10,7 @@ Top-10 neighbors:
 15 : 46512.1
 32 : 49455.7
 6 : 49879.4
-Label for Query 1 : 3
+Label for Query 1 : 8
 Top-10 neighbors:
 1 : 12465.3
 34 : 19364.6
@@ -22,7 +22,7 @@ Top-10 neighbors:
 30 : 37454.5
 37 : 40501.4
 36 : 42151.6
-Label for Query 2 : 1
+Label for Query 2 : 9
 Top-10 neighbors:
 35 : 17246.2
 20 : 22467.4
@@ -34,7 +34,7 @@ Top-10 neighbors:
 22 : 33064
 6 : 33149.3
 17 : 34471.5
-Label for Query 3 : 1
+Label for Query 3 : 4
 Top-10 neighbors:
 33 : 26895.5
 36 : 34522.4
@@ -46,7 +46,7 @@ Top-10 neighbors:
 26 : 54689
 18 : 55888.6
 39 : 56267.3
-Label for Query 4 : 0
+Label for Query 4 : 8
 Top-10 neighbors:
 18 : 33002.1
 19 : 34569.8
@@ -58,7 +58,7 @@ Top-10 neighbors:
 15 : 44845.8
 33 : 46108.6
 3 : 46735.8
-Label for Query 5 : 0
+Label for Query 5 : 7
 Top-10 neighbors:
 12 : 18814.6
 33 : 24119.3
@@ -70,7 +70,7 @@ Top-10 neighbors:
 15 : 39066.3
 21 : 39683.9
 8 : 42107
-Label for Query 6 : 4
+Label for Query 6 : 9
 Top-10 neighbors:
 10 : 11807.2
 4 : 15773.7
@@ -82,7 +82,7 @@ Top-10 neighbors:
 5 : 34810.6
 22 : 36320.6
 33 : 43548
-Label for Query 7 : 2
+Label for Query 7 : 8
 Top-10 neighbors:
 1 : 20395.9
 35 : 23521.9
@@ -106,7 +106,7 @@ Top-10 neighbors:
 4 : 48729.4
 34 : 49535.1
 14 : 53565.8
-Label for Query 9 : 1
+Label for Query 9 : 8
 Top-10 neighbors:
 15 : 8328.22
 16 : 14318.9

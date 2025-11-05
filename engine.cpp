@@ -21,7 +21,7 @@ double computeDistance(double* a, double* b, int dim)
 void Engine::KNN(Params& p, std::vector<DataPoint>& dataset, std::vector<Query>& queries)
 {
         int numtasks, rank;
-        int num_attrs, num_queries, num_data, sendcount, recvcount;
+        int num_attrs, num_queries, num_data;
         MPI_Comm comm = MPI_COMM_WORLD;
         MPI_Status Stat;
         MPI_Comm_size(comm, &numtasks);
@@ -38,12 +38,25 @@ void Engine::KNN(Params& p, std::vector<DataPoint>& dataset, std::vector<Query>&
         MPI_Bcast(&num_queries, 1, MPI_INT, 0, comm);
         MPI_Bcast(&num_data, 1, MPI_INT, 0, comm);
 
-        sendcount = num_data / numtasks;
-        recvcount = num_data / numtasks;
-        if (rank == numtasks - 1)
-        {
-                // last rank takes the remainder
+        int sendcount = num_data / numtasks;
+        int recvcount = num_data / numtasks;
+        if (num_data % numtasks != 0 && rank == numtasks - 1) {
                 recvcount += num_data % numtasks;
+        }
+
+        std::vector<int> sendcounts;
+        std::vector<int> displs;
+        if (rank == 0) {
+                //sendcounts
+                sendcounts.resize(numtasks, sendcount);
+                if (num_data % numtasks != 0) {
+                sendcounts[numtasks - 1] += num_data % numtasks;
+                }
+                //displs
+                displs.resize(numtasks, 0);
+                for (int i = 1; i < numtasks; i++) {
+                        displs[i] = displs[i - 1] + sendcounts[i - 1];
+                }
         }
 
         // recvbuffer(s)
@@ -55,19 +68,16 @@ void Engine::KNN(Params& p, std::vector<DataPoint>& dataset, std::vector<Query>&
         std::vector<double> attrs_tx;
         std::vector<int> id_tx;
         std::vector<int> label_tx;
-        if (rank == 0)
-        {
+        if (rank == 0) {
                 id_tx.resize(num_data);
                 label_tx.resize(num_data);
                 attrs_tx.resize(num_data * num_attrs);
 
                 // Init send buffers
-                for (int i = 0; i < num_data; i++)
-                {
+                for (int i = 0; i < num_data; i++) {
                         id_tx[i] = dataset[i].id;
                         label_tx[i] = dataset[i].label;
-                        for (int j = 0; j < num_attrs; j++)
-                        {
+                        for (int j = 0; j < num_attrs; j++) {
                                 attrs_tx[i * num_attrs + j] = dataset[i].attrs[j];
                         }
                 }
@@ -115,10 +125,10 @@ void Engine::KNN(Params& p, std::vector<DataPoint>& dataset, std::vector<Query>&
                 MPI_Bcast(&query_k, 1, MPI_INT, 0, comm);
                 MPI_Bcast(query_attrs.data(), num_attrs, MPI_DOUBLE, 0, comm);
 
-                MPI_Scatter(id_tx.data(), sendcount, MPI_INT, id_rx.data(), recvcount, MPI_INT, 0, comm);
-                MPI_Scatter(label_tx.data(), sendcount, MPI_INT, label_rx.data(), recvcount, MPI_INT, 0, comm);
-                MPI_Scatter(attrs_tx.data(), sendcount * num_attrs, MPI_DOUBLE,
-                        attrs_rx.data(), recvcount * num_attrs, MPI_DOUBLE, 0, comm);
+                MPI_Scatterv(id_tx.data(), sendcounts.data(), displs.data(), MPI_INT, id_rx.data(), recvcount, MPI_INT, 0, comm);
+                MPI_Scatterv(label_tx.data(), sendcounts.data(), displs.data(), MPI_INT, label_rx.data(), recvcount, MPI_INT, 0, comm);
+                MPI_Scatterv(attrs_tx.data(), sendcounts.data(), displs.data(), MPI_DOUBLE,
+                        attrs_rx.data(), recvcount, MPI_DOUBLE, 0, comm);
 
                 std::vector<tuple> local_results; // distance, label, id
                 for (int j = 0; j < recvcount; j++) {
@@ -139,7 +149,7 @@ void Engine::KNN(Params& p, std::vector<DataPoint>& dataset, std::vector<Query>&
                 if (rank == 0) {
                         best_local_results.resize(numtasks * query_k);
                 }
-                MPI_Gather(local_results.data(), query_k, tuple_type, best_local_results.data(), query_k, tuple_type, 0, comm);
+                MPI_Gatherv(local_results.data(), query_k, tuple_type, best_local_results.data(), sendcounts.data(), displs.data(), tuple_type, 0, comm);
 
                 if (rank == 0) {
                         std::sort(best_local_results.begin(), best_local_results.end(), [](const tuple& a, const tuple& b)
