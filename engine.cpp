@@ -40,6 +40,11 @@ void Engine::KNN(Params& p, std::vector<DataPoint>& dataset, std::vector<Query>&
 
         sendcount = num_data / numtasks;
         recvcount = num_data / numtasks;
+        if (rank == numtasks - 1)
+        {
+                // last rank takes the remainder
+                recvcount += num_data % numtasks;
+        }
 
         // recvbuffer(s)
         std::vector<double> attrs_rx(recvcount * num_attrs);
