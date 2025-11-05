@@ -138,24 +138,11 @@ void Engine::KNN(Params &p, std::vector<DataPoint> &dataset, std::vector<Query> 
                         {
                                 best_local_results.resize(numtasks * query_k);
                         }
-                        std::cout << "Rank " << rank << " starting gathering for query " << query_id << std::endl;
                         
                         MPI_Gather(local_results.data(), query_k, tuple_type,
                         best_local_results.data(), query_k, tuple_type,
                         0, comm);
                         
-                        // std::cout << "Rank " << rank << " finished gathering for query " << query_id << std::endl;
-                        // print best local results
-                        if (rank == 0)
-                        {
-                                std::cout << "Best local results for query " << query_id << ":" << std::endl;
-                                for (int j = 0; j < numtasks * query_k; j++)
-                                {
-                                        std::cout << "Distance: " << best_local_results[j].distance
-                                        << ", Label: " << best_local_results[j].label
-                                        << ", ID: " << best_local_results[j].id << std::endl;
-                                }
-                        }
                         if (rank == 0)
                         {
                                 std::sort(best_local_results.begin(), best_local_results.end(), [](const tuple &a, const tuple &b)

@@ -64,7 +64,7 @@ Update parse_update(const std::string &line)
 
 void reportResult(Query &q, std::vector<std::pair<double, int>> &result, int label)
 {
-#ifdef DEBUG1
+#ifdef DEBUG
         std::cout << "Label for Query " << q.id << " : " << label << "\n";
         std::cout << "Top-" << q.k << " neighbors:\n";
         for (auto &pr : result)
