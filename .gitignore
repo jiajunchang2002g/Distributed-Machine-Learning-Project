@@ -1,8 +1,11 @@
 inputs/
-.vscode
-test.in
-test.out
+.vscode/
+build/
+*.class
 *.o
 *.exe
 *.log
 *.tmp
+mytest.*
+test.in
+test.out
