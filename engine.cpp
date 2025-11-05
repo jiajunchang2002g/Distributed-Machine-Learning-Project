@@ -91,6 +91,7 @@ void Engine::KNN(Params& p, std::vector<DataPoint>& dataset, std::vector<Query>&
                         }
                 }
         }
+        MPI_Barrier(comm);
 
         /*Build datatype describing structure*/
         struct tuple
@@ -145,6 +146,7 @@ void Engine::KNN(Params& p, std::vector<DataPoint>& dataset, std::vector<Query>&
                         double dist = computeDistance(query_attrs.data(), attrs_rx.data() + j * num_attrs, num_attrs);
                         local_results.push_back({ dist, label_rx[j], id_rx[j] });
                 }
+
                 std::sort(local_results.begin(), local_results.end(), [](const tuple& a, const tuple& b)
                         {
                                 if (a.distance == b.distance)
@@ -153,9 +155,12 @@ void Engine::KNN(Params& p, std::vector<DataPoint>& dataset, std::vector<Query>&
                                 }
                                 return a.distance < b.distance; // smaller distance first
                         });
+                local_results.resize(query_k); // keep only top k
+                MPI_Barrier(comm);
 
                 // Master gather local results
                 std::vector<tuple> best_local_results; // distance, label, id
+                MPI_Request gather_request;
                 if (rank == 0) {
                         best_local_results.resize(numtasks * query_k);
                         std::vector<int> gather_recvcounts(numtasks, query_k);
@@ -168,6 +173,7 @@ void Engine::KNN(Params& p, std::vector<DataPoint>& dataset, std::vector<Query>&
                         MPI_Gatherv(local_results.data(), query_k, tuple_type, nullptr, nullptr, nullptr, tuple_type, 0, comm);
                 }
 
+                // Sequential portion
                 if (rank == 0) {
                         std::sort(best_local_results.begin(), best_local_results.end(), [](const tuple& a, const tuple& b)
                                 {
@@ -206,5 +212,6 @@ void Engine::KNN(Params& p, std::vector<DataPoint>& dataset, std::vector<Query>&
                                 });
                         reportResult(queries[i], knn_results, most_frequent_label);
                 }
+                MPI_Barrier(comm);
         }
 }
