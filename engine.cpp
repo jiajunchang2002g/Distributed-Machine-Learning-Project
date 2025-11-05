@@ -189,14 +189,15 @@ void Engine::KNN(Params& p, std::vector<DataPoint>& dataset, std::vector<Query>&
                         int most_frequent_label = -1;
                         for (auto& pair : label_count)
                         {
-                                if (pair.second > max_count)
+                                // break ties by larger label
+                                if (pair.second > max_count || (pair.second == max_count && pair.first > most_frequent_label))
                                 {
                                         max_count = pair.second;
                                         most_frequent_label = pair.first;
                                 }
                         }
 
-                        // sort top k results 
+                        // sort top k results  by distance and id 
                         std::sort(knn_results.begin(), knn_results.end(), [](const std::pair<double, int>& a, const std::pair<double, int>& b)
                                 {
                                         if (a.first == b.first)
