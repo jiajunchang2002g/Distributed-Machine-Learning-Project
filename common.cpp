@@ -6,29 +6,34 @@
 #include <iostream>
 #include <chrono>
 #include "engine.h"
+#include <unistd.h>
 
 Params params;
 
-void parse_params(const std::string &line) {
+void parse_params(const std::string &line)
+{
         std::stringstream ss(line);
         ss >> params.num_data >> params.num_queries >> params.num_attrs;
 }
 
-DataPoint parse_datapoint(const std::string &line, int gid) {
+DataPoint parse_datapoint(const std::string &line, int gid)
+{
         DataPoint p;
         p.id = gid;
         std::stringstream ss(line);
         ss >> p.label;
 
         double val;
-        for (int i = 0; i < params.num_attrs; i++) {
+        for (int i = 0; i < params.num_attrs; i++)
+        {
                 ss >> val;
                 p.attrs.push_back(val);
         }
         return p;
 }
 
-Query parse_query(const std::string &line, int qid) {
+Query parse_query(const std::string &line, int qid)
+{
         Query q;
         std::stringstream ss(line);
         q.id = qid;
@@ -36,35 +41,41 @@ Query parse_query(const std::string &line, int qid) {
         ss >> q.k;
 
         double val;
-        for (int i = 0; i < params.num_attrs; i++) {
+        for (int i = 0; i < params.num_attrs; i++)
+        {
                 ss >> val;
                 q.attrs.push_back(val);
         }
         return q;
 }
 
-Update parse_update(const std::string &line) {
+Update parse_update(const std::string &line)
+{
         Update u;
         std::stringstream ss(line);
         ss >> u.id;
         double val;
-        while (ss >> val) {
+        while (ss >> val)
+        {
                 u.new_attrs.push_back(val);
         }
         return u;
 }
 
-void reportResult(Query &q, std::vector<std::pair<double, int>> &result, int label) {
-#ifdef DEBUG
+void reportResult(Query &q, std::vector<std::pair<double, int>> &result, int label)
+{
+#ifdef DEBUG1
         std::cout << "Label for Query " << q.id << " : " << label << "\n";
         std::cout << "Top-" << q.k << " neighbors:\n";
-        for (auto &pr : result) {
-                std::cout << pr.second << " : " << pr.first << "\n"; 
+        for (auto &pr : result)
+        {
+                std::cout << pr.second << " : " << pr.first << "\n";
         }
 #endif
 }
 
-int main(int argc, char **argv) {
+int main(int argc, char **argv)
+{
         MPI_Init(&argc, &argv);
 
         std::ios::sync_with_stdio(false);
@@ -73,29 +84,47 @@ int main(int argc, char **argv) {
         int rank;
         MPI_Comm_rank(MPI_COMM_WORLD, &rank);
 
+        #ifdef DEBUG1
+        volatile int i = 0;
+        char hostname[256];
+        int sc_status = gethostname(hostname, sizeof(hostname)-1);
+        printf("PID %d on %s ready for attach\n", getpid(), hostname);
+        fflush(stdout);
+        while (0 == i) {
+                sleep(5);
+        }
+        #endif
+
         std::vector<DataPoint> dataset;
         std::vector<Query> queries;
 
-        if (rank == 0) {
+        if (rank == 0)
+        {
                 std::string line;
                 std::getline(std::cin, line);
                 parse_params(line);
 
-                for (int i = 0; i < params.num_data; i++) {
+                for (int i = 0; i < params.num_data; i++)
+                {
                         std::getline(std::cin, line);
-                        if (line.empty()) {
+                        if (line.empty())
+                        {
                                 throw std::runtime_error("Line is empty");
                         }
                         dataset.push_back(parse_datapoint(line, i));
                 }
 
-                for (int i = 0; i < params.num_queries; i++) {
+                for (int i = 0; i < params.num_queries; i++)
+                {
                         std::getline(std::cin, line);
-                        if (line[0] == 'Q') { 
+                        if (line[0] == 'Q')
+                        {
                                 line = line.substr(1);
                                 Query q = parse_query(line, i);
                                 queries.push_back(q);
-                        } else {
+                        }
+                        else
+                        {
                                 std::cout << line << " " << i << std::endl;
                                 throw std::runtime_error("Line is wrongly formatted");
                         }
@@ -106,12 +135,14 @@ int main(int argc, char **argv) {
 
         Engine eng;
         std::chrono::_V2::steady_clock::time_point start_time, end_time;
-        if (rank == 0) {
+        if (rank == 0)
+        {
                 start_time = std::chrono::steady_clock::now();
         }
         eng.KNN(params, dataset, queries);
         MPI_Barrier(MPI_COMM_WORLD);
-        if (rank == 0) {
+        if (rank == 0)
+        {
                 end_time = std::chrono::steady_clock::now();
                 std::cerr << "Time taken: " << std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time).count() << " ms\n";
         }

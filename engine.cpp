@@ -37,6 +37,7 @@ void Engine::KNN(Params &p, std::vector<DataPoint> &dataset, std::vector<Query> 
         MPI_Bcast(&num_attrs, 1, MPI_INT, 0, comm);
         MPI_Bcast(&num_queries, 1, MPI_INT, 0, comm);
         MPI_Bcast(&num_data, 1, MPI_INT, 0, comm);
+        MPI_Barrier(comm);
 
         sendcount = num_data / numtasks;
         recvcount = num_data / numtasks;
@@ -57,9 +58,10 @@ void Engine::KNN(Params &p, std::vector<DataPoint> &dataset, std::vector<Query> 
         if (rank == 0)
         {
                 attrs_tx = (double **)malloc(sizeof(double *) * num_data);
+                void *temp = malloc(sizeof(double) * num_data * num_attrs);
                 for (int i = 0; i < num_data; i++)
                 {
-                        attrs_tx[i] = (double *)malloc(sizeof(double) * num_attrs);
+                        attrs_tx[i] = (double *)temp + sizeof(double) * i * num_attrs;
                 }
                 id_tx = (int *)malloc(sizeof(int) * num_data);
                 label_tx = (int *)malloc(sizeof(int) * num_data);
@@ -69,10 +71,9 @@ void Engine::KNN(Params &p, std::vector<DataPoint> &dataset, std::vector<Query> 
                 {
                         id_tx[i] = dataset[i].id;
                         label_tx[i] = dataset[i].label;
-                        attrs_tx[i] = dataset[i].attrs.data();
+
                 }
         }
-        MPI_Barrier(comm); // Ensure sendbuffer(s) initialized before scatter
 
         /*Build datatype describing structure*/
         struct tuple
@@ -141,7 +142,6 @@ void Engine::KNN(Params &p, std::vector<DataPoint> &dataset, std::vector<Query> 
                         best_local_results.resize(numtasks * query_k);
                 }
                 std::cout << "Rank " << rank << " starting gathering for query " << query_id << std::endl;
-                MPI_Barrier(comm);
 
                 MPI_Gather(local_results.data(), query_k, tuple_type,
                            best_local_results.data(), query_k, tuple_type,
