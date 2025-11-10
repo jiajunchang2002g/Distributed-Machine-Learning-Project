@@ -114,13 +114,11 @@ void Engine::KNN(Params &p, std::vector<DataPoint> &dataset,
   MPI_Type_create_struct(3, blocklengths, disp, types, &tuple_type);
   MPI_Type_commit(&tuple_type);
   /* End build datatype */
-  double comp_time = 0;
-  double comm_time = 0;
+
+  double comm_time = 0.0;
+  double comp_time = 0.0;
 
   for (int i = 0; i < num_queries; i++) {
-    MPI_Request bcast_req, scatter_req_ids, scatter_req_labels,
-        scatter_req_attrs;
-
     // Bcast query
     std::vector<double> query_attrs(num_attrs);
     int query_id;
@@ -131,52 +129,84 @@ void Engine::KNN(Params &p, std::vector<DataPoint> &dataset,
       std::copy(queries[i].attrs.begin(), queries[i].attrs.end(),
                 query_attrs.begin());
     }
-    MPI_Ibcast(&query_id, 1, MPI_INT, 0, comm, &bcast_req);
-    MPI_Ibcast(&query_k, 1, MPI_INT, 0, comm, &bcast_req);
-    MPI_Ibcast(query_attrs.data(), num_attrs, MPI_DOUBLE, 0, comm, &bcast_req);
+    MPI_Bcast(&query_id, 1, MPI_INT, 0, comm);
+    MPI_Bcast(&query_k, 1, MPI_INT, 0, comm);
+    MPI_Bcast(query_attrs.data(), num_attrs, MPI_DOUBLE, 0, comm);
 
-    double start_time;
-    double end_time;
-    start_time = MPI_Wtime();
-    // Scatter datapoints
-    MPI_Iscatterv(id_tx.data(), sendcounts.data(), displs.data(), MPI_INT,
-                  id_rx.data(), recvcount, MPI_INT, 0, comm, &scatter_req_ids);
-    MPI_Iscatterv(label_tx.data(), sendcounts.data(), displs.data(), MPI_INT,
-                  label_rx.data(), recvcount, MPI_INT, 0, comm,
-                  &scatter_req_labels);
-    MPI_Iscatterv(attrs_tx.data(), attrs_sendcounts.data(), attrs_displs.data(),
-                  MPI_DOUBLE, attrs_rx.data(), recvcount * num_attrs,
-                  MPI_DOUBLE, 0, comm, &scatter_req_attrs);
-
-    MPI_Wait(&scatter_req_attrs, &Stat);
-    comm_time += MPI_Wtime() - start_time;
-    MPI_Wait(&bcast_req, &Stat);
-
-    start_time = MPI_Wtime();
-    // Compute local results
+    // Scatter id and label once
+    MPI_Scatterv(id_tx.data(), sendcounts.data(), displs.data(), MPI_INT,
+                 id_rx.data(), recvcount, MPI_INT, 0, comm);
+    MPI_Scatterv(label_tx.data(), sendcounts.data(), displs.data(), MPI_INT,
+                 label_rx.data(), recvcount, MPI_INT, 0, comm);
     std::vector<tuple> local_results; // distance, label, id
-    for (int j = 0; j < recvcount; j++) {
-      double dist = computeDistance(query_attrs.data(),
-                                    attrs_rx.data() + j * num_attrs, num_attrs);
-      local_results.push_back({dist, label_rx[j], id_rx[j]});
+
+    int batch_size = 1000;
+    int num_batches = (recvcount + batch_size - 1) / batch_size;
+
+    std::vector<double> buf1(batch_size * num_attrs);
+    std::vector<double> buf2(batch_size * num_attrs);
+
+    MPI_Request req_current, req_next;
+    int offset = 0;
+    int current_count = std::min(batch_size, recvcount - offset);
+
+    std::vector<int> batch_sendcounts(numtasks);
+    std::vector<int> batch_displs(numtasks);
+    for (int r = 0; r < numtasks; ++r) {
+      int rank_offset =
+          std::max(0, std::min(batch_size, sendcounts[r] - offset));
+      batch_sendcounts[r] = rank_offset * num_attrs;
+      batch_displs[r] = attrs_displs[r] + offset * num_attrs;
     }
-    comp_time += MPI_Wtime() - start_time;
 
-    MPI_Wait(&scatter_req_ids, &Stat);
-    MPI_Wait(&scatter_req_labels, &Stat);
+    // Scatter first batch
+    MPI_Iscatterv(attrs_tx.data() + offset * num_attrs, batch_sendcounts.data(),
+                  batch_displs.data(), MPI_DOUBLE, buf1.data(),
+                  current_count * num_attrs, MPI_DOUBLE, 0, MPI_COMM_WORLD,
+                  &req_current);
 
-    start_time = MPI_Wtime();
+    for (int b = 0; b < num_batches; b++) {
+      // Wait for current batch
+      double comm_start_time = MPI_Wtime();
+      MPI_Wait(&req_current, &Stat);
+      comm_time += MPI_Wtime() - comm_start_time;
+
+      // Launch next batch
+      offset = (b + 1) * batch_size;
+      int next_count = std::min(batch_size, recvcount - offset);
+      double *next_buf = (b % 2 == 0) ? buf2.data() : buf1.data();
+      if (b + 1 < num_batches) {
+        comm_start_time = MPI_Wtime();
+        MPI_Iscatterv(attrs_tx.data() + offset * num_attrs,
+                      batch_sendcounts.data(), batch_displs.data(), MPI_DOUBLE,
+                      next_buf, next_count * num_attrs, MPI_DOUBLE, 0,
+                      MPI_COMM_WORLD, &req_next);
+      }
+
+      // Compute distances on current batch
+      double comp_start_time = MPI_Wtime();
+      double *current_buf = (b % 2 == 0) ? buf1.data() : buf2.data();
+      int current_offset = b * batch_size;
+      for (int j = 0; j < current_count; j++) {
+        int idx = current_offset + j;
+        double dist = computeDistance(query_attrs.data(),
+                                      current_buf + j * num_attrs, num_attrs);
+        local_results.push_back({dist, label_rx[idx], id_rx[idx]});
+      }
+      comp_time += MPI_Wtime() - comp_start_time;
+
+      req_current = req_next;
+      current_count = next_count;
+    }
+
+    // Keep top-k
     std::nth_element(local_results.begin(), local_results.begin() + query_k,
                      local_results.end(), [](const tuple &a, const tuple &b) {
-                       if (a.distance == b.distance) {
-                         return a.label > b.label; // larger label first
-                       }
-                       return a.distance < b.distance; // smaller distance first
+                       if (a.distance == b.distance)
+                         return a.label > b.label;
+                       return a.distance < b.distance;
                      });
-    local_results.resize(query_k); // keep only top k
-    comp_time += MPI_Wtime() - start_time;
-
-    MPI_Barrier(comm);
+    local_results.resize(query_k);
 
     // Master gather local results
     std::vector<tuple> best_local_results; // distance, label, id
@@ -198,12 +228,13 @@ void Engine::KNN(Params &p, std::vector<DataPoint> &dataset,
 
     // Sequential portion
     if (rank == 0) {
-      std::sort(best_local_results.begin(), best_local_results.end(),
-                [](const tuple &a, const tuple &b) {
-                  if (a.distance == b.distance)
-                    return a.label > b.label;     // larger label first
-                  return a.distance < b.distance; // smaller distance first
-                });
+      std::nth_element(
+          best_local_results.begin(), best_local_results.begin() + query_k,
+          best_local_results.end(), [](const tuple &a, const tuple &b) {
+            if (a.distance == b.distance)
+              return a.label > b.label;     // larger label first
+            return a.distance < b.distance; // smaller distance first
+          });
       // Collect labels of top k
       std::unordered_map<int, int> label_count;
       std::vector<std::pair<double, int>> knn_results; // distance, id
@@ -235,8 +266,6 @@ void Engine::KNN(Params &p, std::vector<DataPoint> &dataset,
           });
       reportResult(queries[i], knn_results, most_frequent_label);
     }
-
-    // MPI_Barrier(comm);
   }
 
   std::cout << "Rank " << rank << " computation time: " << comp_time
