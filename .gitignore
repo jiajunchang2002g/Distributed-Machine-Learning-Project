@@ -1,12 +1,16 @@
-inputs/
-.vscode/
-build/
-*.class
-*.o
-*.exe
-*.log
-*.tmp
-mytest.*
-test.in
-test.out
-engine.debug
+# Ignore everything
+/*
+
+# But keep these:
+!benchmarks/
+!Makefile
+!common.cpp
+!engine.cpp
+!engine.h
+!common.h
+!generate_input.py
+!run_bench.sh
+!inputs.zip
+
+# Optionally, keep .gitignore itself
+!.gitignore
