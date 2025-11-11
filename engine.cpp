@@ -9,267 +9,286 @@
 #include <mpi.h>
 
 double computeDistance(double *a, double *b, int dim) {
-  double sum = 0.0;
-  for (int i = 0; i < dim; i++) {
-    sum += (a[i] - b[i]) * (a[i] - b[i]);
-  }
-  return sum;
+        double sum = 0.0;
+        for (int i = 0; i < dim; i++) {
+                sum += (a[i] - b[i]) * (a[i] - b[i]);
+        }
+        return sum;
 }
 
 void Engine::KNN(Params &p, std::vector<DataPoint> &dataset,
-                 std::vector<Query> &queries) {
-  int numtasks, rank;
-  int num_attrs, num_queries, num_data;
-  MPI_Comm comm = MPI_COMM_WORLD;
-  MPI_Status Stat;
-  MPI_Comm_size(comm, &numtasks);
-  MPI_Comm_rank(comm, &rank);
+                std::vector<Query> &queries) {
+        int numtasks, rank;
+        int num_attrs, num_queries, num_data;
+        MPI_Comm comm = MPI_COMM_WORLD;
+        MPI_Status Stat;
+        MPI_Comm_size(comm, &numtasks);
+        MPI_Comm_rank(comm, &rank);
 
-  // Broadcast parameters
-  if (rank == 0) {
-    num_attrs = p.num_attrs;
-    num_queries = p.num_queries;
-    num_data = p.num_data;
-  }
-  MPI_Bcast(&num_attrs, 1, MPI_INT, 0, comm);
-  MPI_Bcast(&num_queries, 1, MPI_INT, 0, comm);
-  MPI_Bcast(&num_data, 1, MPI_INT, 0, comm);
-
-  int sendcount = num_data / numtasks;
-  int recvcount = num_data / numtasks;
-  if (num_data % numtasks != 0 && rank == numtasks - 1) {
-    recvcount += num_data % numtasks;
-  }
-
-  std::vector<int> sendcounts;
-  std::vector<int> displs;
-  std::vector<int> attrs_sendcounts;
-  std::vector<int> attrs_displs;
-  if (rank == 0) {
-    // sendcounts
-    sendcounts.resize(numtasks, sendcount);
-    if (num_data % numtasks != 0) {
-      sendcounts[numtasks - 1] += num_data % numtasks;
-    }
-    // displs
-    displs.resize(numtasks, 0);
-    for (int i = 1; i < numtasks; i++) {
-      displs[i] = displs[i - 1] + sendcounts[i - 1];
-    }
-    // attrs sendcounts and displs
-    attrs_sendcounts.resize(numtasks);
-    attrs_displs.resize(numtasks);
-    for (int i = 0; i < numtasks; i++) {
-      attrs_sendcounts[i] = sendcounts[i] * num_attrs;
-      attrs_displs[i] = displs[i] * num_attrs;
-    }
-  }
-
-  // recvbuffer(s)
-  std::vector<double> attrs_rx(recvcount * num_attrs);
-  std::vector<int> id_rx(recvcount);
-  std::vector<int> label_rx(recvcount);
-
-  // sendbuffers(s)
-  std::vector<double> attrs_tx;
-  std::vector<int> id_tx;
-  std::vector<int> label_tx;
-  if (rank == 0) {
-    id_tx.resize(num_data);
-    label_tx.resize(num_data);
-    attrs_tx.resize(num_data * num_attrs);
-
-    // Init send buffers
-    for (int i = 0; i < num_data; i++) {
-      id_tx[i] = dataset[i].id;
-      label_tx[i] = dataset[i].label;
-      for (int j = 0; j < num_attrs; j++) {
-        attrs_tx[i * num_attrs + j] = dataset[i].attrs[j];
-      }
-    }
-  }
-  MPI_Barrier(comm);
-
-  /*Build datatype describing structure*/
-  struct tuple {
-    double distance;
-    int label;
-    int id;
-  };
-  tuple example_tuple = {0.0, 0, 0};
-  MPI_Datatype tuple_type;
-  MPI_Datatype types[3] = {MPI_DOUBLE, MPI_INT, MPI_INT};
-  int blocklengths[3] = {1, 1, 1};
-  MPI_Aint disp[3];
-
-  MPI_Get_address(&example_tuple.distance, &disp[0]);
-  MPI_Get_address(&example_tuple.label, &disp[1]);
-  MPI_Get_address(&example_tuple.id, &disp[2]);
-
-  MPI_Aint base = disp[0];
-  for (int i = 0; i < 3; i++) {
-    disp[i] -= base;
-  }
-
-  MPI_Type_create_struct(3, blocklengths, disp, types, &tuple_type);
-  MPI_Type_commit(&tuple_type);
-  /* End build datatype */
-
-  double comm_time = 0.0;
-  double comp_time = 0.0;
-
-  for (int i = 0; i < num_queries; i++) {
-    // Bcast query
-    std::vector<double> query_attrs(num_attrs);
-    int query_id;
-    int query_k;
-    if (rank == 0) {
-      query_id = queries[i].id;
-      query_k = queries[i].k;
-      std::copy(queries[i].attrs.begin(), queries[i].attrs.end(),
-                query_attrs.begin());
-    }
-    MPI_Bcast(&query_id, 1, MPI_INT, 0, comm);
-    MPI_Bcast(&query_k, 1, MPI_INT, 0, comm);
-    MPI_Bcast(query_attrs.data(), num_attrs, MPI_DOUBLE, 0, comm);
-
-    // Scatter id and label once
-    MPI_Scatterv(id_tx.data(), sendcounts.data(), displs.data(), MPI_INT,
-                 id_rx.data(), recvcount, MPI_INT, 0, comm);
-    MPI_Scatterv(label_tx.data(), sendcounts.data(), displs.data(), MPI_INT,
-                 label_rx.data(), recvcount, MPI_INT, 0, comm);
-    std::vector<tuple> local_results; // distance, label, id
-
-    int batch_size = 1000;
-    int num_batches = (recvcount + batch_size - 1) / batch_size;
-
-    std::vector<double> buf1(batch_size * num_attrs);
-    std::vector<double> buf2(batch_size * num_attrs);
-
-    MPI_Request req_current, req_next;
-    int offset = 0;
-    int current_count = std::min(batch_size, recvcount - offset);
-
-    std::vector<int> batch_sendcounts(numtasks);
-    std::vector<int> batch_displs(numtasks);
-    for (int r = 0; r < numtasks; ++r) {
-      int rank_offset =
-          std::max(0, std::min(batch_size, sendcounts[r] - offset));
-      batch_sendcounts[r] = rank_offset * num_attrs;
-      batch_displs[r] = attrs_displs[r] + offset * num_attrs;
-    }
-
-    // Scatter first batch
-    MPI_Iscatterv(attrs_tx.data() + offset * num_attrs, batch_sendcounts.data(),
-                  batch_displs.data(), MPI_DOUBLE, buf1.data(),
-                  current_count * num_attrs, MPI_DOUBLE, 0, MPI_COMM_WORLD,
-                  &req_current);
-
-    for (int b = 0; b < num_batches; b++) {
-      // Wait for current batch
-      double comm_start_time = MPI_Wtime();
-      MPI_Wait(&req_current, &Stat);
-      comm_time += MPI_Wtime() - comm_start_time;
-
-      // Launch next batch
-      offset = (b + 1) * batch_size;
-      int next_count = std::min(batch_size, recvcount - offset);
-      double *next_buf = (b % 2 == 0) ? buf2.data() : buf1.data();
-      if (b + 1 < num_batches) {
-        comm_start_time = MPI_Wtime();
-        MPI_Iscatterv(attrs_tx.data() + offset * num_attrs,
-                      batch_sendcounts.data(), batch_displs.data(), MPI_DOUBLE,
-                      next_buf, next_count * num_attrs, MPI_DOUBLE, 0,
-                      MPI_COMM_WORLD, &req_next);
-      }
-
-      // Compute distances on current batch
-      double comp_start_time = MPI_Wtime();
-      double *current_buf = (b % 2 == 0) ? buf1.data() : buf2.data();
-      int current_offset = b * batch_size;
-      for (int j = 0; j < current_count; j++) {
-        int idx = current_offset + j;
-        double dist = computeDistance(query_attrs.data(),
-                                      current_buf + j * num_attrs, num_attrs);
-        local_results.push_back({dist, label_rx[idx], id_rx[idx]});
-      }
-      comp_time += MPI_Wtime() - comp_start_time;
-
-      req_current = req_next;
-      current_count = next_count;
-    }
-
-    // Keep top-k
-    std::nth_element(local_results.begin(), local_results.begin() + query_k,
-                     local_results.end(), [](const tuple &a, const tuple &b) {
-                       if (a.distance == b.distance)
-                         return a.label > b.label;
-                       return a.distance < b.distance;
-                     });
-    local_results.resize(query_k);
-
-    // Master gather local results
-    std::vector<tuple> best_local_results; // distance, label, id
-    MPI_Request gather_request;
-    if (rank == 0) {
-      best_local_results.resize(numtasks * query_k);
-      std::vector<int> gather_recvcounts(numtasks, query_k);
-      std::vector<int> gather_displs(numtasks);
-      for (int i = 0; i < numtasks; i++) {
-        gather_displs[i] = i * query_k;
-      }
-      MPI_Gatherv(local_results.data(), query_k, tuple_type,
-                  best_local_results.data(), gather_recvcounts.data(),
-                  gather_displs.data(), tuple_type, 0, comm);
-    } else {
-      MPI_Gatherv(local_results.data(), query_k, tuple_type, nullptr, nullptr,
-                  nullptr, tuple_type, 0, comm);
-    }
-
-    // Sequential portion
-    if (rank == 0) {
-      std::nth_element(
-          best_local_results.begin(), best_local_results.begin() + query_k,
-          best_local_results.end(), [](const tuple &a, const tuple &b) {
-            if (a.distance == b.distance)
-              return a.label > b.label;     // larger label first
-            return a.distance < b.distance; // smaller distance first
-          });
-      // Collect labels of top k
-      std::unordered_map<int, int> label_count;
-      std::vector<std::pair<double, int>> knn_results; // distance, id
-      for (int i = 0; i < query_k; i++) {
-        knn_results.push_back(std::make_pair(best_local_results[i].distance,
-                                             best_local_results[i].id));
-        label_count[best_local_results[i].label]++;
-      }
-
-      // Determine most frequent label
-      int max_count = 0;
-      int most_frequent_label = -1;
-      for (auto &pair : label_count) {
-        // break ties by larger label
-        if (pair.second > max_count ||
-            (pair.second == max_count && pair.first > most_frequent_label)) {
-          max_count = pair.second;
-          most_frequent_label = pair.first;
+        // Broadcast parameters
+        if (rank == 0) {
+                num_attrs = p.num_attrs;
+                num_queries = p.num_queries;
+                num_data = p.num_data;
         }
-      }
+        MPI_Bcast(&num_attrs, 1, MPI_INT, 0, comm);
+        MPI_Bcast(&num_queries, 1, MPI_INT, 0, comm);
+        MPI_Bcast(&num_data, 1, MPI_INT, 0, comm);
 
-      // sort top k results  by distance and id
-      std::sort(
-          knn_results.begin(), knn_results.end(),
-          [](const std::pair<double, int> &a, const std::pair<double, int> &b) {
-            if (a.first == b.first)
-              return a.second > b.second; // larger id first
-            return a.first < b.first;     // smaller distance first
-          });
-      reportResult(queries[i], knn_results, most_frequent_label);
-    }
-  }
+        int sendcount = num_data / numtasks;
+        int recvcount = num_data / numtasks;
+        if (rank == numtasks - 1) {
+                recvcount += num_data % numtasks;
+        }
 
-  std::cout << "Rank " << rank << " computation time: " << comp_time
-            << " seconds." << std::endl;
-  std::cout << "Rank " << rank << " communication time: " << comm_time
-            << " seconds." << std::endl;
+        std::vector<int> sendcounts;
+        std::vector<int> displs;
+        std::vector<int> attrs_sendcounts;
+        std::vector<int> attrs_displs;
+        if (rank == 0) {
+                // sendcounts
+                sendcounts.resize(numtasks, sendcount);
+                if (num_data % numtasks != 0) {
+                        sendcounts[numtasks - 1] += num_data % numtasks;
+                }
+                // displs
+                displs.resize(numtasks, 0);
+                for (int i = 1; i < numtasks; i++) {
+                        displs[i] = displs[i - 1] + sendcounts[i - 1];
+                }
+                // attrs sendcounts and displs
+                attrs_sendcounts.resize(numtasks);
+                attrs_displs.resize(numtasks);
+                for (int i = 0; i < numtasks; i++) {
+                        attrs_sendcounts[i] = sendcounts[i] * num_attrs;
+                        attrs_displs[i] = displs[i] * num_attrs;
+                }
+        }
+
+        // recvbuffer(s)
+        std::vector<double> attrs_rx(recvcount * num_attrs);
+        std::vector<int> id_rx(recvcount);
+        std::vector<int> label_rx(recvcount);
+
+        // sendbuffers(s)
+        std::vector<double> attrs_tx;
+        std::vector<int> id_tx;
+        std::vector<int> label_tx;
+        if (rank == 0) {
+                id_tx.resize(num_data);
+                label_tx.resize(num_data);
+                attrs_tx.resize(num_data * num_attrs);
+
+                // Init send buffers
+                for (int i = 0; i < num_data; i++) {
+                        id_tx[i] = dataset[i].id;
+                        label_tx[i] = dataset[i].label;
+                        for (int j = 0; j < num_attrs; j++) {
+                                attrs_tx[i * num_attrs + j] = dataset[i].attrs[j];
+                        }
+                }
+        }
+        MPI_Barrier(comm);
+
+        /*Build datatype describing structure*/
+        struct tuple {
+                double distance;
+                int label;
+                int id;
+        };
+        tuple example_tuple = {0.0, 0, 0};
+        MPI_Datatype tuple_type;
+        MPI_Datatype types[3] = {MPI_DOUBLE, MPI_INT, MPI_INT};
+        int blocklengths[3] = {1, 1, 1};
+        MPI_Aint disp[3];
+
+        MPI_Get_address(&example_tuple.distance, &disp[0]);
+        MPI_Get_address(&example_tuple.label, &disp[1]);
+        MPI_Get_address(&example_tuple.id, &disp[2]);
+
+        MPI_Aint base = disp[0];
+        for (int i = 0; i < 3; i++) {
+                disp[i] -= base;
+        }
+
+        MPI_Type_create_struct(3, blocklengths, disp, types, &tuple_type);
+        MPI_Type_commit(&tuple_type);
+        /* End build datatype */
+
+        double comm_time = 0.0;
+        double comp_time = 0.0;
+
+        for (int i = 0; i < num_queries; i++) {
+                // Bcast query
+                std::vector<double> query_attrs(num_attrs);
+                int query_id;
+                int query_k;
+                if (rank == 0) {
+                        query_id = queries[i].id;
+                        query_k = queries[i].k;
+                        std::copy(queries[i].attrs.begin(), queries[i].attrs.end(),
+                                        query_attrs.begin());
+                }
+                MPI_Bcast(&query_id, 1, MPI_INT, 0, comm);
+                MPI_Bcast(&query_k, 1, MPI_INT, 0, comm);
+                MPI_Bcast(query_attrs.data(), num_attrs, MPI_DOUBLE, 0, comm);
+
+                // Scatter id and label once
+                MPI_Scatterv(id_tx.data(), sendcounts.data(), displs.data(), MPI_INT,
+                                id_rx.data(), recvcount, MPI_INT, 0, comm);
+                MPI_Scatterv(label_tx.data(), sendcounts.data(), displs.data(), MPI_INT,
+                                label_rx.data(), recvcount, MPI_INT, 0, comm);
+                /*
+                MPI_Scatterv(attrs_tx.data(), attrs_sendcounts.data(),
+                                attrs_displs.data(), MPI_DOUBLE, attrs_rx.data(),
+                                recvcount * num_attrs, MPI_DOUBLE, 0, comm);
+                */
+                std::vector<tuple> local_results; // distance, label, id
+
+                // Tune this parameter
+                int batch_size = 1000;
+                // Ceiling of recvcount / batch_size
+                int num_batches = (recvcount + batch_size - 1) / batch_size;
+
+                std::vector<double> buf1(batch_size * num_attrs);
+                std::vector<double> buf2(batch_size * num_attrs);
+                std::vector<std::vector<int>> batch_attrs_sendcounts;
+                std::vector<std::vector<int>> batch_attrs_displs;
+                // batch_size  
+                std::vector<int> batch_attrs_recvcounts(num_batches, batch_size * num_attrs);
+                // last batch recvcount may be smaller 
+                batch_attrs_recvcounts[num_batches - 1] = (recvcount % num_batches) * num_attrs;
+                if (rank == 0) {
+                        // b_attrs_sendcounts 
+                        batch_attrs_sendcounts.resize(num_batches, std::vector<int>(numtasks, 0));
+                        for (int batch = 0; batch < num_batches; batch++) {
+                                for (int task = 0; task < numtasks; task++) {
+                                        batch_attrs_sendcounts[batch][task] = batch_attrs_recvcounts[batch];
+                                }                                
+                        }
+                        // b_attrs_displs
+                        batch_attrs_displs.resize(num_batches, std::vector<int>(numtasks, 0));
+                        for (int task = 1; task < numtasks; task++) {
+                                for (int batch = 0; batch < num_batches; batch++) {
+                                        batch_attrs_displs[batch][task] = batch_attrs_displs[batch - 1][task] +
+                                                batch_attrs_sendcounts[batch - 1][task];
+                                }
+                        }
+                }
+
+                MPI_Request req_current, req_next;
+                // scatter batch 0
+                MPI_Iscatterv(attrs_tx.data(), batch_attrs_sendcounts[0].data(),
+                                batch_attrs_displs[0].data(), MPI_DOUBLE, buf1.data(),
+                                batch_attrs_recvcounts[0], MPI_DOUBLE, 0, MPI_COMM_WORLD,
+                                &req_current);
+
+                for (int batch = 0; batch < num_batches; batch++) {
+                        // Wait for current batch, i.e. batch 
+                        double comm_start_time = MPI_Wtime();
+                        MPI_Wait(&req_current, &Stat);
+                        comm_time += MPI_Wtime() - comm_start_time;
+
+                        // Scatter next batch, i.e. batch + 1
+                        int offset_next = (batch + 1) * batch_size;
+                        double *next_buf = (batch % 2 == 0) ? buf2.data() : buf1.data();
+                        if (batch + 1 < num_batches) {
+                                comm_start_time = MPI_Wtime();
+                                MPI_Iscatterv(attrs_tx.data() + offset_next * num_attrs,
+                                                batch_attrs_sendcounts[batch + 1].data(), batch_attrs_displs[batch + 1].data(), MPI_DOUBLE,
+                                                next_buf, batch_attrs_recvcounts[batch + 1], MPI_DOUBLE, 0,
+                                                MPI_COMM_WORLD, &req_next);
+                        }
+
+                        // Compute distances on current batch
+                        double comp_start_time = MPI_Wtime();
+                        double *current_buf = (batch % 2 == 0) ? buf1.data() : buf2.data();
+                        int current_offset = batch * batch_size;
+                        int batch_recvcount = batch_attrs_recvcounts[batch] / num_attrs;
+                        for (int j = 0; j < batch_recvcount; j++) {
+                                int idx = current_offset + j;
+                                double dist = computeDistance(query_attrs.data(),
+                                                current_buf + j * num_attrs, num_attrs);
+                                local_results.push_back({dist, label_rx[idx], id_rx[idx]});
+                        }
+                        comp_time += MPI_Wtime() - comp_start_time;
+
+                        if (batch + 1 < num_batches) {
+                                req_current = req_next;
+                        }
+                }
+
+                // Keep top-k
+                std::nth_element(local_results.begin(), local_results.begin() + query_k,
+                                local_results.end(), [](const tuple &a, const tuple &b) {
+                                if (a.distance == b.distance)
+                                return a.label > b.label;
+                                return a.distance < b.distance;
+                                });
+                local_results.resize(query_k);
+
+                // Master gather local results
+                std::vector<tuple> best_local_results; // distance, label, id
+                MPI_Request gather_request;
+                if (rank == 0) {
+                        best_local_results.resize(numtasks * query_k);
+                        std::vector<int> gather_recvcounts(numtasks, query_k);
+                        std::vector<int> gather_displs(numtasks);
+                        for (int i = 0; i < numtasks; i++) {
+                                gather_displs[i] = i * query_k;
+                        }
+                        MPI_Gatherv(local_results.data(), query_k, tuple_type,
+                                        best_local_results.data(), gather_recvcounts.data(),
+                                        gather_displs.data(), tuple_type, 0, comm);
+                } else {
+                        MPI_Gatherv(local_results.data(), query_k, tuple_type, nullptr, nullptr,
+                                        nullptr, tuple_type, 0, comm);
+                }
+
+                // Sequential portion
+                if (rank == 0) {
+                        std::nth_element(
+                                        best_local_results.begin(), best_local_results.begin() + query_k,
+                                        best_local_results.end(), [](const tuple &a, const tuple &b) {
+                                        if (a.distance == b.distance)
+                                        return a.label > b.label;     // larger label first
+                                        return a.distance < b.distance; // smaller distance first
+                                        });
+                        // Collect labels of top k
+                        std::unordered_map<int, int> label_count;
+                        std::vector<std::pair<double, int>> knn_results; // distance, id
+                        for (int i = 0; i < query_k; i++) {
+                                knn_results.push_back(std::make_pair(best_local_results[i].distance,
+                                                        best_local_results[i].id));
+                                label_count[best_local_results[i].label]++;
+                        }
+
+                        // Determine most frequent label
+                        int max_count = 0;
+                        int most_frequent_label = -1;
+                        for (auto &pair : label_count) {
+                                // break ties by larger label
+                                if (pair.second > max_count ||
+                                                (pair.second == max_count && pair.first > most_frequent_label)) {
+                                        max_count = pair.second;
+                                        most_frequent_label = pair.first;
+                                }
+                        }
+
+                        // sort top k results  by distance and id
+                        std::sort(
+                                        knn_results.begin(), knn_results.end(),
+                                        [](const std::pair<double, int> &a, const std::pair<double, int> &b) {
+                                        if (a.first == b.first)
+                                        return a.second > b.second; // larger id first
+                                        return a.first < b.first;     // smaller distance first
+                                        });
+                        reportResult(queries[i], knn_results, most_frequent_label);
+                }
+        }
+
+        std::cout << "Rank " << rank << " computation time: " << comp_time
+                << " seconds." << std::endl;
+        std::cout << "Rank " << rank << " communication time: " << comm_time
+                << " seconds." << std::endl;
 }
