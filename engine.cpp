@@ -171,6 +171,7 @@ void Engine::KNN(Params &p, std::vector<DataPoint> &dataset,
                         // b_attrs_displs
                         batch_attrs_displs.resize(num_batches, std::vector<int>(numtasks, 0));
                         for (int task = 0; task < numtasks; task++) {
+                                batch_attrs_displs[0][task] = task * recvcount * num_attrs;
                                 for (int batch = 1; batch < num_batches; batch++) {
                                         batch_attrs_displs[batch][task] = batch_attrs_displs[batch - 1][task] +
                                                 batch_attrs_sendcounts[batch - 1][task];
@@ -192,9 +193,9 @@ void Engine::KNN(Params &p, std::vector<DataPoint> &dataset,
                         comm_time += MPI_Wtime() - comm_start_time;
 
                         // Scatter next batch, i.e. batch + 1
-                        int offset_next = (batch + 1) * batch_size;
-                        double *next_buf = (batch % 2 == 0) ? buf2.data() : buf1.data();
                         if (batch + 1 < num_batches) {
+                                int offset_next = (batch + 1) * batch_size;
+                                double *next_buf = (batch % 2 == 0) ? buf2.data() : buf1.data();
                                 comm_start_time = MPI_Wtime();
                                 MPI_Iscatterv(attrs_tx.data() + offset_next * num_attrs,
                                                 batch_attrs_sendcounts[batch + 1].data(), batch_attrs_displs[batch + 1].data(), MPI_DOUBLE,
