@@ -5,6 +5,7 @@
 #include <tuple>
 #include <unordered_map>
 #include <vector>
+#include <cassert>
 
 #include <mpi.h>
 
@@ -154,10 +155,11 @@ void Engine::KNN(Params &p, std::vector<DataPoint> &dataset,
                 std::vector<double> buf2(batch_size * num_attrs);
                 std::vector<std::vector<int>> batch_attrs_sendcounts;
                 std::vector<std::vector<int>> batch_attrs_displs;
+
                 // batch_size  
                 std::vector<int> batch_attrs_recvcounts(num_batches, batch_size * num_attrs);
-                // last batch recvcount may be smaller 
-                batch_attrs_recvcounts[num_batches - 1] = (recvcount % num_batches) * num_attrs;
+                batch_attrs_recvcounts[num_batches - 1] = (recvcount % batch_size) * num_attrs;
+
                 if (rank == 0) {
                         // b_attrs_sendcounts 
                         batch_attrs_sendcounts.resize(num_batches, std::vector<int>(numtasks, 0));
@@ -168,8 +170,8 @@ void Engine::KNN(Params &p, std::vector<DataPoint> &dataset,
                         }
                         // b_attrs_displs
                         batch_attrs_displs.resize(num_batches, std::vector<int>(numtasks, 0));
-                        for (int task = 1; task < numtasks; task++) {
-                                for (int batch = 0; batch < num_batches; batch++) {
+                        for (int task = 0; task < numtasks; task++) {
+                                for (int batch = 1; batch < num_batches; batch++) {
                                         batch_attrs_displs[batch][task] = batch_attrs_displs[batch - 1][task] +
                                                 batch_attrs_sendcounts[batch - 1][task];
                                 }
