@@ -123,7 +123,7 @@ void Engine::KNN(Params &p, std::vector<DataPoint> &dataset,
       double gather_results_time = 0;
       double bcast_query_time = 0;
       double comp_time = 0;
-      double comm_time = scatter_datapoints_time + gather_results_time + bcast_query_time;
+      double comm_time= 0;
       double start_time;
       double end_time;
 
@@ -236,7 +236,7 @@ void Engine::KNN(Params &p, std::vector<DataPoint> &dataset,
                   reportResult(queries[i], knn_results, most_frequent_label);
             }
       }
-
+      comm_time += scatter_datapoints_time + bcast_query_time + gather_results_time;
       std::cout << "Rank " << rank << " communication time: " << comm_time
                 << " seconds." << std::endl;
       std::cout << "Rank " << rank << " computation time: " << comp_time
