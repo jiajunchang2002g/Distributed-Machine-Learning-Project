@@ -84,17 +84,6 @@ int main(int argc, char **argv)
         int rank;
         MPI_Comm_rank(MPI_COMM_WORLD, &rank);
 
-        #ifdef DEBUG1
-        volatile int i = 0;
-        char hostname[256];
-        int sc_status = gethostname(hostname, sizeof(hostname)-1);
-        printf("PID %d on %s ready for attach\n", getpid(), hostname);
-        fflush(stdout);
-        while (0 == i) {
-                sleep(5);
-        }
-        #endif
-
         std::vector<DataPoint> dataset;
         std::vector<Query> queries;
 
