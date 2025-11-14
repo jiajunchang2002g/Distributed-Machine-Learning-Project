@@ -259,20 +259,11 @@ void Engine::KNN(Params &p, std::vector<DataPoint> &dataset,
     // ============================================================
     // 5. Local computation: each rank handles q_local queries
     // ============================================================
-    std::vector<tuple> local_knn;
-    local_knn.reserve(dp_local);
-
-    // For reduce result on column roots
-    std::vector<tuple> col_knn_local;
-    // each query will have its own k value 
-    // std::vector<tuple> col_knn_final; 
-
-    // ============================================================
-    // 6. Process each local query
-    // ============================================================
+    std::vector<std::vector<tuple>> local_results(q_local);
+    
     for (int qi = 0; qi < q_local; qi++) {
 
-        local_knn.clear();
+        local_results[qi].clear();
         int k = local_queries.at(qi).k;
 
         // Compute local distances
@@ -282,13 +273,13 @@ void Engine::KNN(Params &p, std::vector<DataPoint> &dataset,
                 &dp_attr_local[dp * num_attrs],
                 num_attrs
             );
-            local_knn.push_back({dist, dp_label_local.at(dp), dp_id_local.at(dp)});
+            local_results[qi].push_back({dist, dp_label_local.at(dp), dp_id_local.at(dp)});
         }
 
         // Keep local top k
-        std::nth_element(local_knn.begin(),
-                         local_knn.begin() + k,
-                         local_knn.end(),
+        std::nth_element(local_results[qi].begin(),
+                         local_results[qi].begin() + k,
+                         local_results[qi].end(),
                          [](const tuple &a, const tuple &b){
                              if (a.distance == b.distance)
                                  return a.label > b.label;
@@ -296,76 +287,27 @@ void Engine::KNN(Params &p, std::vector<DataPoint> &dataset,
                          });
 
         // resize to k
-        local_knn.resize(k);
+        local_results[qi].resize(k);
+    }
 
-        // // =====================================================
-        // // Reduce along *datapoint* dimension (col_comm)
-        // // =====================================================
-        // col_knn_local = local_knn;  // local contributor
-
-        // MPI_Reduce(col_knn_local.data(), col_knn_final.data(),
-        //            k, tuple_type,        // count = k
-        //            // custom op not needed: we reduce by performing a Gather then sort
-        //            MPI_MAX,              // placeholder (we gather differently)
-        //            0, col_comm);
-
-        // // NOTE:
-        // // True reduction requires custom operator. To keep code simpler,
-        // // we gather then merge on column root:
-        // // (This section below implements merging)
-        // if (col == 0) {
-        //     // Each rank sends top-k, gather them:
-        //     std::vector<tuple> gathered(Pd * k);
-
-        //     MPI_Gather(col_knn_local.data(), k, tuple_type,
-        //                gathered.data(),      k, tuple_type,
-        //                0, col_comm);
-
-        //     // merge & sort
-        //     std::sort(gathered.begin(), gathered.end(),
-        //               [](const tuple &a, const tuple &b){
-        //                   if (a.distance == b.distance)
-        //                       return a.label > b.label;
-        //                   return a.distance < b.distance;
-        //               });
-
-        //     // Keep final top k
-        //     for (int i = 0; i < k; i++)
-        //         col_knn_final[i] = gathered[i];
-        // }
-
-        // =====================================================
-        // Column root now has final kNN for this query
-        // =====================================================
+    // Gather local results at column roots
+    std::vector<tuple> local_results_flat;
+    std::vector<int> k_per_query(q_local);
+    for (int qi = 0; qi < q_local; qi++) {
+        int k = local_results[qi].size(); // may vary per query
+        k_per_query[qi] = k;
+        local_results_flat.insert(local_results_flat.end(),
+                        local_results[qi].begin(),
+                        local_results[qi].end());
     }
 
     // // ============================================================
     // // 7. Gather final results from column roots to rank 0
     // // ============================================================
-    // if (col == 0) {
-    //     // send q_local blocks to rank 0
-    //     MPI_Gather(col_knn_final.data(), q_local * queries[0].k, tuple_type,
-    //                (rank == 0 ? MPI_IN_PLACE : nullptr),
-    //                q_local * queries[0].k, tuple_type,
-    //                0, world);
-    // }
-    // else {
-    //     MPI_Gather(nullptr, 0, tuple_type,
-    //                nullptr, 0, tuple_type,
-    //                0, world);
-    // }
 
     // // ============================================================
     // // 8. Rank 0 reconstructs full results and prints
     // // ============================================================
-    // if (rank == 0) {
-
-    //     // reconstruct and report query results
-    //     // (full assembly omitted for brevity; follows your original code)
-
-    //     std::cout << "All queries processed in 2D decomposition.\n";
-    //     // call reportResult() in order for each query
-    // }
 
     MPI_Type_free(&tuple_type);
 }
