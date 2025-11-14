@@ -1,4 +1,5 @@
 #include "engine.h"
+#include "utils.h"
 
 #include <mpi.h>
 
@@ -64,6 +65,16 @@ void Engine::KNN(Params &p, std::vector<DataPoint> &dataset,
     MPI_Cart_sub(cart, row_dims, &row_comm);
     MPI_Cart_sub(cart, col_dims, &col_comm);
 
+    // print grid info
+    std::cout << "Rank " << rank << " at (" << row << "," << col << ")\n";  
+
+    // print row/col communicators
+    int row_rank, col_rank;
+    MPI_Comm_rank(row_comm, &row_rank);
+    MPI_Comm_rank(col_comm, &col_rank);
+    std::cout << "Rank " << rank << " has row_comm rank " << row_rank 
+              << " and col_comm rank " << col_rank << "\n";
+
     // ============================================================
     // 2. Partition datapoints along Pd rows
     // ============================================================
@@ -71,7 +82,6 @@ void Engine::KNN(Params &p, std::vector<DataPoint> &dataset,
     int dp_rem     = num_data % Pd;
     int dp_local   = dp_per_row + (row == Pd-1 ? dp_rem : 0);
 
-    // row leader (col == 0) receives scattered datapoints
     std::vector<int>    dp_id_local(dp_local);
     std::vector<int>    dp_label_local(dp_local);
     std::vector<double> dp_attr_local(dp_local * num_attrs);
@@ -79,12 +89,7 @@ void Engine::KNN(Params &p, std::vector<DataPoint> &dataset,
     if (rank == 0) {
         // Build sendcounts/displs for rows
         std::vector<int> r_sendcounts(Pd), r_displs(Pd);
-        for (int r = 0; r < Pd; r++) {
-            r_sendcounts[r] = dp_per_row + (r == Pd-1 ? dp_rem : 0);
-        }
-        r_displs[0] = 0;
-        for (int r = 1; r < Pd; r++)
-            r_displs[r] = r_displs[r-1] + r_sendcounts[r-1];
+        build_sendcounts_displs(num_data, Pd, row, r_sendcounts, r_displs);
 
         // Scatter ids + labels
         MPI_Scatterv(dataset.data(), r_sendcounts.data(), r_displs.data(),
@@ -107,11 +112,8 @@ void Engine::KNN(Params &p, std::vector<DataPoint> &dataset,
 
         // compute attr_sendcounts/displs
         std::vector<int> attr_sc(Pd), attr_disp(Pd);
-        for (int r = 0; r < Pd; r++)
-            attr_sc[r] = r_sendcounts[r] * num_attrs;
-        attr_disp[0] = 0;
-        for (int r = 1; r < Pd; r++)
-            attr_disp[r] = attr_disp[r-1] + attr_sc[r-1];
+        build_sendcounts_displs_attrs(r_sendcounts, num_attrs,
+                                         attr_sc, attr_disp);
 
         MPI_Scatterv(all_attrs.data(), attr_sc.data(), attr_disp.data(),
                      MPI_DOUBLE, dp_attr_local.data(), dp_local*num_attrs,
@@ -146,6 +148,10 @@ void Engine::KNN(Params &p, std::vector<DataPoint> &dataset,
 
     std::vector<Query> local_queries(q_local);
 
+    std::vector<int> query_id_local(q_local);
+    std::vector<int> query_k_local(q_local);
+    std::vector<double> query_attr_local(q_local * num_attrs);
+
     if (rank == 0) {
         // Build query sendcounts for columns
         std::vector<int> q_sendcounts(Pq), q_displs(Pq);
@@ -156,7 +162,7 @@ void Engine::KNN(Params &p, std::vector<DataPoint> &dataset,
         for (int c = 1; c < Pq; c++)
             q_displs[c] = q_displs[c-1] + q_sendcounts[c-1];
 
-        // separate arrays for broadcasting/scattering
+        // convert queries to separate arrays
         std::vector<int> q_ids(num_queries), q_ks(num_queries);
         std::vector<double> q_attrs(num_queries * num_attrs);
 
@@ -169,12 +175,12 @@ void Engine::KNN(Params &p, std::vector<DataPoint> &dataset,
 
         // Scatter ids
         MPI_Scatterv(q_ids.data(), q_sendcounts.data(), q_displs.data(),
-                     MPI_INT, &local_queries[0].id, 1, MPI_INT,
+                     MPI_INT, query_id_local.data(), q_local, MPI_INT,
                      0, col_comm);
 
         // Scatter ks (each column leader gets full chunk)
         MPI_Scatterv(q_ks.data(), q_sendcounts.data(), q_displs.data(),
-                     MPI_INT, &local_queries[0].k, 1, MPI_INT,
+                     MPI_INT, query_k_local.data(), q_local, MPI_INT,
                      0, col_comm);
 
         // Scatter attrs
@@ -185,37 +191,41 @@ void Engine::KNN(Params &p, std::vector<DataPoint> &dataset,
         for (int c = 1; c < Pq; c++)
             qa_disp[c] = qa_disp[c-1] + qa_sc[c-1];
 
-        std::vector<double> local_attrs(q_local * num_attrs);
+        std::vector<double> query_attr_local(q_local * num_attrs);
         MPI_Scatterv(q_attrs.data(), qa_sc.data(), qa_disp.data(),
-                     MPI_DOUBLE, local_attrs.data(), q_local*num_attrs,
+                     MPI_DOUBLE, query_attr_local.data(), q_local*num_attrs,
                      MPI_DOUBLE, 0, col_comm);
 
-        // Fill attr vectors
+        // Fill local query vector
         for (int i = 0; i < q_local; i++) {
+            local_queries[i].id = query_id_local[i];
+            local_queries[i].k  = query_k_local[i];
             local_queries[i].attrs.resize(num_attrs);
             for (int a = 0; a < num_attrs; a++)
-                local_queries[i].attrs[a] = local_attrs[i * num_attrs + a];
+                local_queries[i].attrs[a] = query_attr_local[i * num_attrs + a];
         }
     }
     else if (row == 0) {
         // column leaders
         MPI_Scatterv(nullptr, nullptr, nullptr,
-                     MPI_INT, &local_queries[0].id, 1, MPI_INT,
+                     MPI_INT, query_id_local.data(), q_local, MPI_INT,
                      0, col_comm);
 
         MPI_Scatterv(nullptr, nullptr, nullptr,
-                     MPI_INT, &local_queries[0].k, 1, MPI_INT,
+                     MPI_INT, query_k_local.data(), q_local, MPI_INT,
                      0, col_comm);
 
-        std::vector<double> local_attrs(q_local * num_attrs);
-        MPI_Scatterv(nullptr, nullptr, nullptr,
-                     local_attrs.data(), q_local*num_attrs,
+        std::vector<double> query_attr_local(q_local * num_attrs);
+        MPI_Scatterv(nullptr, nullptr, nullptr, MPI_DOUBLE,
+                     query_attr_local.data(), q_local*num_attrs,
                      MPI_DOUBLE, 0, col_comm);
 
         for (int i = 0; i < q_local; i++) {
+            local_queries[i].id = query_id_local[i];
+            local_queries[i].k  = query_k_local[i];
             local_queries[i].attrs.resize(num_attrs);
             for (int a = 0; a < num_attrs; a++)
-                local_queries[i].attrs[a] = local_attrs[i * num_attrs + a];
+                local_queries[i].attrs[a] = query_attr_local[i * num_attrs + a];
         }
     }
 
@@ -228,7 +238,7 @@ void Engine::KNN(Params &p, std::vector<DataPoint> &dataset,
     }
 
     // ============================================================
-    // 4. Define tuple type (same as your original)
+    // 4. Define tuple type for (distance, label, id)
     // ============================================================
     struct tuple { double distance; int label; int id; };
     tuple example;
@@ -254,7 +264,8 @@ void Engine::KNN(Params &p, std::vector<DataPoint> &dataset,
 
     // For reduce result on column roots
     std::vector<tuple> col_knn_local;
-    std::vector<tuple> col_knn_final(q_local * queries[0].k); // max k per query assumed
+    // each query will have its own k value 
+    // std::vector<tuple> col_knn_final; 
 
     // ============================================================
     // 6. Process each local query
@@ -262,16 +273,16 @@ void Engine::KNN(Params &p, std::vector<DataPoint> &dataset,
     for (int qi = 0; qi < q_local; qi++) {
 
         local_knn.clear();
-        int k = local_queries[qi].k;
+        int k = local_queries.at(qi).k;
 
         // Compute local distances
         for (int dp = 0; dp < dp_local; dp++) {
             double dist = computeDistance(
-                local_queries[qi].attrs.data(),
+                local_queries.at(qi).attrs.data(),
                 &dp_attr_local[dp * num_attrs],
                 num_attrs
             );
-            local_knn.push_back({dist, dp_label_local[dp], dp_id_local[dp]});
+            local_knn.push_back({dist, dp_label_local.at(dp), dp_id_local.at(dp)});
         }
 
         // Keep local top k
@@ -287,74 +298,74 @@ void Engine::KNN(Params &p, std::vector<DataPoint> &dataset,
         // resize to k
         local_knn.resize(k);
 
-        // =====================================================
-        // Reduce along *datapoint* dimension (col_comm)
-        // =====================================================
-        col_knn_local = local_knn;  // local contributor
+        // // =====================================================
+        // // Reduce along *datapoint* dimension (col_comm)
+        // // =====================================================
+        // col_knn_local = local_knn;  // local contributor
 
-        MPI_Reduce(col_knn_local.data(), col_knn_final.data(),
-                   k, tuple_type,        // count = k
-                   // custom op not needed: we reduce by performing a Gather then sort
-                   MPI_MAX,              // placeholder (we gather differently)
-                   0, col_comm);
+        // MPI_Reduce(col_knn_local.data(), col_knn_final.data(),
+        //            k, tuple_type,        // count = k
+        //            // custom op not needed: we reduce by performing a Gather then sort
+        //            MPI_MAX,              // placeholder (we gather differently)
+        //            0, col_comm);
 
-        // NOTE:
-        // True reduction requires custom operator. To keep code simpler,
-        // we gather then merge on column root:
-        // (This section below implements merging)
-        if (col == 0) {
-            // Each rank sends top-k, gather them:
-            std::vector<tuple> gathered(Pd * k);
+        // // NOTE:
+        // // True reduction requires custom operator. To keep code simpler,
+        // // we gather then merge on column root:
+        // // (This section below implements merging)
+        // if (col == 0) {
+        //     // Each rank sends top-k, gather them:
+        //     std::vector<tuple> gathered(Pd * k);
 
-            MPI_Gather(col_knn_local.data(), k, tuple_type,
-                       gathered.data(),      k, tuple_type,
-                       0, col_comm);
+        //     MPI_Gather(col_knn_local.data(), k, tuple_type,
+        //                gathered.data(),      k, tuple_type,
+        //                0, col_comm);
 
-            // merge & sort
-            std::sort(gathered.begin(), gathered.end(),
-                      [](const tuple &a, const tuple &b){
-                          if (a.distance == b.distance)
-                              return a.label > b.label;
-                          return a.distance < b.distance;
-                      });
+        //     // merge & sort
+        //     std::sort(gathered.begin(), gathered.end(),
+        //               [](const tuple &a, const tuple &b){
+        //                   if (a.distance == b.distance)
+        //                       return a.label > b.label;
+        //                   return a.distance < b.distance;
+        //               });
 
-            // Keep final top k
-            for (int i = 0; i < k; i++)
-                col_knn_final[i] = gathered[i];
-        }
+        //     // Keep final top k
+        //     for (int i = 0; i < k; i++)
+        //         col_knn_final[i] = gathered[i];
+        // }
 
         // =====================================================
         // Column root now has final kNN for this query
         // =====================================================
     }
 
-    // ============================================================
-    // 7. Gather final results from column roots to rank 0
-    // ============================================================
-    if (col == 0) {
-        // send q_local blocks to rank 0
-        MPI_Gather(col_knn_final.data(), q_local * queries[0].k, tuple_type,
-                   (rank == 0 ? MPI_IN_PLACE : nullptr),
-                   q_local * queries[0].k, tuple_type,
-                   0, world);
-    }
-    else {
-        MPI_Gather(nullptr, 0, tuple_type,
-                   nullptr, 0, tuple_type,
-                   0, world);
-    }
+    // // ============================================================
+    // // 7. Gather final results from column roots to rank 0
+    // // ============================================================
+    // if (col == 0) {
+    //     // send q_local blocks to rank 0
+    //     MPI_Gather(col_knn_final.data(), q_local * queries[0].k, tuple_type,
+    //                (rank == 0 ? MPI_IN_PLACE : nullptr),
+    //                q_local * queries[0].k, tuple_type,
+    //                0, world);
+    // }
+    // else {
+    //     MPI_Gather(nullptr, 0, tuple_type,
+    //                nullptr, 0, tuple_type,
+    //                0, world);
+    // }
 
-    // ============================================================
-    // 8. Rank 0 reconstructs full results and prints
-    // ============================================================
-    if (rank == 0) {
+    // // ============================================================
+    // // 8. Rank 0 reconstructs full results and prints
+    // // ============================================================
+    // if (rank == 0) {
 
-        // reconstruct and report query results
-        // (full assembly omitted for brevity; follows your original code)
+    //     // reconstruct and report query results
+    //     // (full assembly omitted for brevity; follows your original code)
 
-        std::cout << "All queries processed in 2D decomposition.\n";
-        // call reportResult() in order for each query
-    }
+    //     std::cout << "All queries processed in 2D decomposition.\n";
+    //     // call reportResult() in order for each query
+    // }
 
     MPI_Type_free(&tuple_type);
 }
