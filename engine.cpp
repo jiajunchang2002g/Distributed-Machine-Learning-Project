@@ -133,12 +133,6 @@ void Engine::KNN(Params &p, std::vector<DataPoint> &dataset,
         build_sendcounts_displs(num_queries, dims[1], col,
                                     q_sendcounts, q_displs);
         std::vector<int> q_ids(num_queries), q_ks(num_queries);
-        MPI_Scatterv(q_ids.data(), q_sendcounts.data(), q_displs.data(),
-                     MPI_INT, query_id_local.data(), q_recvcount, MPI_INT,
-                     0, row_comm);
-        MPI_Scatterv(q_ks.data(), q_sendcounts.data(), q_displs.data(),
-                     MPI_INT, query_k_local.data(), q_recvcount, MPI_INT,
-                     0, row_comm);
         std::vector<double> q_attrs(num_queries * num_attrs);
         for (int i = 0; i < num_queries; i++) {
             q_ids[i] = queries[i].id;
@@ -146,6 +140,13 @@ void Engine::KNN(Params &p, std::vector<DataPoint> &dataset,
             for (int a = 0; a < num_attrs; a++)
                 q_attrs[i * num_attrs + a] = queries[i].attrs[a];
         }
+        MPI_Scatterv(q_ids.data(), q_sendcounts.data(), q_displs.data(),
+                     MPI_INT, query_id_local.data(), q_recvcount, MPI_INT,
+                     0, row_comm);
+        MPI_Scatterv(q_ks.data(), q_sendcounts.data(), q_displs.data(),
+                     MPI_INT, query_k_local.data(), q_recvcount, MPI_INT,
+                     0, row_comm);
+        
         std::vector<int> q_attrs_sc(dims[1]), q_attrs_disp(dims[1]);
         build_sendcounts_displs_attrs(q_sendcounts, num_attrs,
                                          q_attrs_sc, q_attrs_disp);
@@ -262,7 +263,7 @@ void Engine::KNN(Params &p, std::vector<DataPoint> &dataset,
         std::vector<tuple> results_recv_buf(local_results_flat.size() * dims[0]);
         std::vector<int> sendcounts(dims[0]);
         std::vector<int> displs(dims[0]);
-        build_sendcounts_displs(local_results_flat.size() * dims[0], dims[0], row, sendcounts, displs);
+        build_sendcounts_displs(local_results_flat.size(), dims[0], row, sendcounts, displs);
         MPI_Gatherv(local_results_flat.data(), local_results_flat.size(), tuple_type,
                     results_recv_buf.data(), sendcounts.data(), displs.data(),
                     tuple_type, 0, col_comm);
@@ -303,9 +304,12 @@ void Engine::KNN(Params &p, std::vector<DataPoint> &dataset,
     // ============================================================
     // 7. Gather final results from column roots to rank 0
     // ============================================================
+    int num_tuples_per_query = gathered_results[0].size();
+    int final_results_size;
+    MPI_Reduce(&num_tuples_per_query, &final_results_size, 1, MPI_INT, MPI_SUM, 0, row_comm);
     std::vector<tuple> final_results_recv_buf;
     if (rank == 0) {
-        std::vector<tuple> final_results_recv_buf(dims[1] * gathered_results[0].size());
+        final_results_recv_buf.resize(final_results_size);
         std::vector<int> sendcounts(dims[1]);
         std::vector<int> displs(dims[1]);
         build_sendcounts_displs(dims[1] * gathered_results[0].size(), dims[1], 0, sendcounts, displs);
