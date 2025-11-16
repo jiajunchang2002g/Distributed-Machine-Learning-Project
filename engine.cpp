@@ -62,14 +62,14 @@ void Engine::KNN(Params &p, std::vector<DataPoint> &dataset,
         int dp_remainder = num_data % dims[0];
         int dp_recvcount = num_data / dims[0] + (row == 0 ? dp_remainder : 0);  // root and its row handle remainder
 
-        // print dp_recvcount
-        for (int r=0; r<size; r++) {
-                MPI_Barrier(MPI_COMM_WORLD);
-                if (rank == r) {
-                        std::cout << "Rank " << rank << " (row " << row << ", col " << col << ") will receive "
-                                  << dp_recvcount << " datapoints.\n";
-                }
-        }
+        // // print dp_recvcount
+        // for (int r=0; r<size; r++) {
+        //         MPI_Barrier(MPI_COMM_WORLD);
+        //         if (rank == r) {
+        //                 std::cout << "Rank " << rank << " (row " << row << ", col " << col << ") will receive "
+        //                           << dp_recvcount << " datapoints.\n";
+        //         }
+        // }
 
         std::vector<int>    dp_id_recv_buf(dp_recvcount);
         std::vector<int>    dp_label_recv_buf(dp_recvcount);
@@ -134,40 +134,40 @@ void Engine::KNN(Params &p, std::vector<DataPoint> &dataset,
                                 MPI_DOUBLE, 0, col_comm);
         }
 
-        // print datapoints
-        for (int r=0; r<size; r++) {
-                MPI_Barrier(MPI_COMM_WORLD);
-                if (rank == r) {
-                        std::cout << "Datapoints received by rank " << rank << ":\n";
-                        for (int i = 0; i < dp_recvcount; i++) {
-                                std::cout << "ID: " << dp_id_recv_buf[i] << ", Label: " << dp_label_recv_buf[i] << ", Attrs: ";
-                                for (int a = 0; a < num_attrs; a++) {
-                                        std::cout << dp_attr_recv_buf[i * num_attrs + a] << " ";
-                                }
-                                std::cout << "\n";
-                        }
-                }
-        }
+        // // print datapoints
+        // for (int r=0; r<size; r++) {
+        //         MPI_Barrier(MPI_COMM_WORLD);
+        //         if (rank == r) {
+        //                 std::cout << "Datapoints received by rank " << rank << ":\n";
+        //                 for (int i = 0; i < dp_recvcount; i++) {
+        //                         std::cout << "ID: " << dp_id_recv_buf[i] << ", Label: " << dp_label_recv_buf[i] << ", Attrs: ";
+        //                         for (int a = 0; a < num_attrs; a++) {
+        //                                 std::cout << dp_attr_recv_buf[i * num_attrs + a] << " ";
+        //                         }
+        //                         std::cout << "\n";
+        //                 }
+        //         }
+        // }
 
         // // FIRST COL broadcast to OTHER COLS
         MPI_Bcast(dp_id_recv_buf.data(), dp_recvcount, MPI_INT, 0, row_comm);
         MPI_Bcast(dp_label_recv_buf.data(), dp_recvcount, MPI_INT, 0, row_comm);
         MPI_Bcast(dp_attr_recv_buf.data(), dp_recvcount * num_attrs, MPI_DOUBLE, 0, row_comm);
 
-        // print datapoints
-        for (int r=0; r<size; r++) {
-                MPI_Barrier(MPI_COMM_WORLD);
-                if (rank == r) {
-                        std::cout << "Datapoints received by rank " << rank << ":\n";
-                        for (int i = 0; i < dp_recvcount; i++) {
-                                std::cout << "ID: " << dp_id_recv_buf[i] << ", Label: " << dp_label_recv_buf[i] << ", Attrs: ";
-                                for (int a = 0; a < num_attrs; a++) {
-                                        std::cout << dp_attr_recv_buf[i * num_attrs + a] << " ";
-                                }
-                                std::cout << "\n";
-                        }
-                }
-        }
+        // // print datapoints
+        // for (int r=0; r<size; r++) {
+        //         MPI_Barrier(MPI_COMM_WORLD);
+        //         if (rank == r) {
+        //                 std::cout << "Datapoints received by rank " << rank << ":\n";
+        //                 for (int i = 0; i < dp_recvcount; i++) {
+        //                         std::cout << "ID: " << dp_id_recv_buf[i] << ", Label: " << dp_label_recv_buf[i] << ", Attrs: ";
+        //                         for (int a = 0; a < num_attrs; a++) {
+        //                                 std::cout << dp_attr_recv_buf[i * num_attrs + a] << " ";
+        //                         }
+        //                         std::cout << "\n";
+        //                 }
+        //         }
+        // }
 
         // ============================================================
         // 3. Scatter queries from master to first row of workers
@@ -242,40 +242,40 @@ void Engine::KNN(Params &p, std::vector<DataPoint> &dataset,
                                 MPI_DOUBLE, 0, row_comm);
         }
 
-        // print queries
-        for (int r=0; r<size; r++) {
-                MPI_Barrier(MPI_COMM_WORLD);
-                if (rank == r) {
-                        std::cout << "Queries received by rank " << rank << ":\n";
-                        for (int i = 0; i < q_recvcount; i++) {
-                                std::cout << "ID: " << query_id_recv_buf[i] << ", k: " << query_k_recv_buf[i] << ", Attrs: ";
-                                for (int a = 0; a < num_attrs; a++) {
-                                        std::cout << query_attr_recv_buf[i * num_attrs + a] << " ";
-                                }
-                                std::cout << "\n";
-                        }
-                }
-        }
+        // // print queries
+        // for (int r=0; r<size; r++) {
+        //         MPI_Barrier(MPI_COMM_WORLD);
+        //         if (rank == r) {
+        //                 std::cout << "Queries received by rank " << rank << ":\n";
+        //                 for (int i = 0; i < q_recvcount; i++) {
+        //                         std::cout << "ID: " << query_id_recv_buf[i] << ", k: " << query_k_recv_buf[i] << ", Attrs: ";
+        //                         for (int a = 0; a < num_attrs; a++) {
+        //                                 std::cout << query_attr_recv_buf[i * num_attrs + a] << " ";
+        //                         }
+        //                         std::cout << "\n";
+        //                 }
+        //         }
+        // }
 
         // Broadcast queries from first row to OTHER ROWS
         MPI_Bcast(query_id_recv_buf.data(),    q_recvcount,         MPI_INT,    0, col_comm);
         MPI_Bcast(query_k_recv_buf.data(),     q_recvcount,         MPI_INT,    0, col_comm);
         MPI_Bcast(query_attr_recv_buf.data(),  q_recvcount*num_attrs, MPI_DOUBLE, 0, col_comm);
 
-        // print queries
-        for (int r=0; r<size; r++) {
-                MPI_Barrier(MPI_COMM_WORLD);
-                if (rank == r) {
-                        std::cout << "Queries received by rank " << rank << ":\n";
-                        for (int i = 0; i < q_recvcount; i++) {
-                                std::cout << "ID: " << query_id_recv_buf[i] << ", k: " << query_k_recv_buf[i] << ", Attrs: ";
-                                for (int a = 0; a < num_attrs; a++) {
-                                        std::cout << query_attr_recv_buf[i * num_attrs + a] << " ";
-                                }
-                                std::cout << "\n";
-                        }
-                }
-        }
+        // // print queries
+        // for (int r=0; r<size; r++) {
+        //         MPI_Barrier(MPI_COMM_WORLD);
+        //         if (rank == r) {
+        //                 std::cout << "Queries received by rank " << rank << ":\n";
+        //                 for (int i = 0; i < q_recvcount; i++) {
+        //                         std::cout << "ID: " << query_id_recv_buf[i] << ", k: " << query_k_recv_buf[i] << ", Attrs: ";
+        //                         for (int a = 0; a < num_attrs; a++) {
+        //                                 std::cout << query_attr_recv_buf[i * num_attrs + a] << " ";
+        //                         }
+        //                         std::cout << "\n";
+        //                 }
+        //         }
+        // }
 
         // ============================================================
         // 4. Define tuple type for (distance, label, id)
@@ -299,41 +299,66 @@ void Engine::KNN(Params &p, std::vector<DataPoint> &dataset,
         // ============================================================
         // 5. Local computation 
         // ============================================================
-        // std::vector<std::vector<tuple>> local_results(q_recvcount);
+        std::vector<std::vector<tuple>> local_results(q_recvcount);
 
-        // for (int qi = 0; qi < q_recvcount; qi++) {
+        for (int qi = 0; qi < q_recvcount; qi++) {
 
-        //         std::vector<tuple> &local_result = local_results[qi];
-        //         int query_k = query_k_recv_buf.at(qi);
-        //         for (int dp = 0; dp < dp_recvcount; dp++) {
-        //                 double dist = computeDistance(
-        //                                 &query_attr_recv_buf[qi * num_attrs],
-        //                                 &dp_attr_recv_buf[dp * num_attrs],
-        //                                 num_attrs
-        //                                 );
-        //                 local_result.push_back({dist, dp_label_recv_buf.at(dp), dp_id_recv_buf.at(dp)});
+                std::vector<tuple> &local_result = local_results[qi];
+                int query_k = query_k_recv_buf.at(qi);
+                for (int dp = 0; dp < dp_recvcount; dp++) {
+                        double dist = computeDistance(
+                                        &query_attr_recv_buf[qi * num_attrs],
+                                        &dp_attr_recv_buf[dp * num_attrs],
+                                        num_attrs
+                                        );
+                        local_result.push_back({dist, dp_label_recv_buf.at(dp), dp_id_recv_buf.at(dp)});
+                }
+
+                // keep only top-k closest
+                std::nth_element(local_result.begin(), local_result.begin() + query_k,
+                             local_result.end(), [](const tuple &a, const tuple &b) {
+                                   if (a.distance == b.distance) {
+                                         return a.label > b.label; // larger label first
+                                   }
+                                   return a.distance < b.distance; // smaller distance first
+                             });
+                local_result.resize(query_k);
+        }
+
+        // // print local_results
+        // for (int r=0; r<size; r++) {
+        //         MPI_Barrier(MPI_COMM_WORLD);
+        //         if (rank == r) {
+        //                 std::cout << "Local results from rank " << rank << ":\n";
+        //                 for (int qi = 0; qi < q_recvcount; qi++) {
+        //                         std::cout << " Query " << qi << ":\n";
+        //                         for (auto &tup : local_results[qi]) {
+        //                                 std::cout << "  Distance: " << tup.distance << ", Label: " << tup.label << ", ID: " << tup.id << "\n";
+        //                         }
+        //                 }
         //         }
-
-        //         // keep only top-k closest
-        //         std::nth_element(local_result.begin(), local_result.begin() + query_k,
-        //                      local_result.end(), [](const tuple &a, const tuple &b) {
-        //                            if (a.distance == b.distance) {
-        //                                  return a.label > b.label; // larger label first
-        //                            }
-        //                            return a.distance < b.distance; // smaller distance first
-        //                      });
-        //         local_result.resize(query_k);
         // }
 
-        // std::vector<tuple> local_results_flat;                          // index == sum_{j=0}^{qi-1} k_j + ki
-        // std::vector<int> query_k(q_recvcount);
-        // for (int qi = 0; qi < q_recvcount; qi++) {
-        //         int k = local_results[qi].size(); 
-        //         query_k[qi] = k;
-        //         local_results_flat.insert(local_results_flat.end(),
-        //                         local_results[qi].begin(),
-        //                         local_results[qi].end());
-        // }
+        std::vector<tuple> local_results_flat;                          // index == sum_{j=0}^{qi-1} k_j + ki
+        std::vector<int> query_k(q_recvcount);
+        for (int qi = 0; qi < q_recvcount; qi++) {
+                query_k[qi] = local_results[qi].size(); 
+                for (auto &tup : local_results[qi]) {
+                        local_results_flat.push_back(tup);
+                }
+        }
+
+        // print flat local results
+        for (int r=0; r<size; r++) {
+                MPI_Barrier(MPI_COMM_WORLD);
+                if (rank == r) {
+                        std::cout << "Flat local results from rank " << rank << ":\n";
+                        for (size_t i = 0; i < local_results_flat.size(); i++) {
+                                auto &tup = local_results_flat[i];
+                                std::cout << "Distance: " << tup.distance << ", Label: " << tup.label << ", ID: " << tup.id << "\n";
+                        }
+                }
+        }
 
         // ============================================================
         // 6. Gather all flat local results to first row
@@ -345,46 +370,17 @@ void Engine::KNN(Params &p, std::vector<DataPoint> &dataset,
         //                 std::cout << "Local results from rank " << rank << " (count=" << res_sendcount << "):\n";
         //         }
         // }
-        // int res_recvcount = local_results_flat.size() * dims[1];
-        // MPI_Reduce(&res_sendcount, &res_recvcount, 1, MPI_INT,
-        //                 MPI_SUM, 0, col_comm);
+        // int res_recvcount = local_results_flat.size() * dims[0]; // dims[0] == number of rows
+        // // MPI_Reduce(&res_sendcount, &res_recvcount, 1, MPI_INT,
+        // //                 MPI_SUM, 0, col_comm);
+        // std::vector<int> res_recvbuffer;
         
         // // FIRST ROW ONLY gather results
-        // if (col == 0) {
-        //         // std::vector<int> res_recvbuffer(res_recvcount);
-        //         // std::vector<int> res_recvcounts(dims[1], res_sendcount);
-        //         // MPI_Gather(&res_sendcount, 1, MPI_INT,
-        //         //                 res_recvcounts.data(), 1, MPI_INT,
-        //         //                 0, col_comm);
-
-        //         // std::vector<int> res_displs(dims[1]);
-        //         // res_displs[0] = 0;
-        //         // for (int i = 1; i < dims[1]; i++)
-        //         //         res_displs[i] = res_displs[i-1] + res_recvcounts[i-1];
-
-        //         // MPI_Gather(local_results_flat.data(),
-        //         //                 local_results_flat.size(),
-        //         //                 tuple_type,
-        //         //                 res_recvbuffer.data(),
-        //         //                 res_recvcount,
-        //         //                 tuple_type,
-        //         //                 0,
-        //         //                 col_comm); 
-        // } 
-        // // OTHER ROWS send results
-        // else {
-        //         // MPI_Gather(&res_sendcount, 1, MPI_INT,
-        //         //                 nullptr, 1, nullptr,
-        //         //                 0, col_comm);
-        //         // MPI_Gather(local_results_flat.data(),
-        //         //                 local_results_flat.size(),
-        //         //                 tuple_type,
-        //         //                 nullptr,
-        //         //                 0,
-        //         //                 tuple_type,
-        //         //                 0,
-        //         //                 col_comm);
+        // if (row == 0) {
+        //         res_recvbuffer.resize(res_recvcount);
         // }
+        // MPI_Gather(local_results_flat.data(), local_results_flat.size(), 
+        //                         tuple_type, res_recvbuffer.data(), res_recvcount, tuple_type, 0, col_comm); 
 
         // ============================================================
         // 6b. First row : assemble per-query gathered results
