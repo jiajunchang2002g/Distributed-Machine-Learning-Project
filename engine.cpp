@@ -61,16 +61,7 @@ void Engine::KNN(Params &p, std::vector<DataPoint> &dataset,
         // ============================================================
         int dp_remainder = num_data % dims[0];
         int dp_recvcount = num_data / dims[0] + (row == 0 ? dp_remainder : 0);  // root and its row handle remainder
-
-        // // print dp_recvcount
-        // for (int r=0; r<size; r++) {
-        //         MPI_Barrier(MPI_COMM_WORLD);
-        //         if (rank == r) {
-        //                 std::cout << "Rank " << rank << " (row " << row << ", col " << col << ") will receive "
-        //                           << dp_recvcount << " datapoints.\n";
-        //         }
-        // }
-
+        
         std::vector<int>    dp_id_recv_buf(dp_recvcount);
         std::vector<int>    dp_label_recv_buf(dp_recvcount);
         std::vector<double> dp_attr_recv_buf(dp_recvcount * num_attrs);         // index == dpi * num_attrs
@@ -134,40 +125,10 @@ void Engine::KNN(Params &p, std::vector<DataPoint> &dataset,
                                 MPI_DOUBLE, 0, col_comm);
         }
 
-        // // print datapoints
-        // for (int r=0; r<size; r++) {
-        //         MPI_Barrier(MPI_COMM_WORLD);
-        //         if (rank == r) {
-        //                 std::cout << "Datapoints received by rank " << rank << ":\n";
-        //                 for (int i = 0; i < dp_recvcount; i++) {
-        //                         std::cout << "ID: " << dp_id_recv_buf[i] << ", Label: " << dp_label_recv_buf[i] << ", Attrs: ";
-        //                         for (int a = 0; a < num_attrs; a++) {
-        //                                 std::cout << dp_attr_recv_buf[i * num_attrs + a] << " ";
-        //                         }
-        //                         std::cout << "\n";
-        //                 }
-        //         }
-        // }
-
         // // FIRST COL broadcast to OTHER COLS
         MPI_Bcast(dp_id_recv_buf.data(), dp_recvcount, MPI_INT, 0, row_comm);
         MPI_Bcast(dp_label_recv_buf.data(), dp_recvcount, MPI_INT, 0, row_comm);
         MPI_Bcast(dp_attr_recv_buf.data(), dp_recvcount * num_attrs, MPI_DOUBLE, 0, row_comm);
-
-        // // print datapoints
-        // for (int r=0; r<size; r++) {
-        //         MPI_Barrier(MPI_COMM_WORLD);
-        //         if (rank == r) {
-        //                 std::cout << "Datapoints received by rank " << rank << ":\n";
-        //                 for (int i = 0; i < dp_recvcount; i++) {
-        //                         std::cout << "ID: " << dp_id_recv_buf[i] << ", Label: " << dp_label_recv_buf[i] << ", Attrs: ";
-        //                         for (int a = 0; a < num_attrs; a++) {
-        //                                 std::cout << dp_attr_recv_buf[i * num_attrs + a] << " ";
-        //                         }
-        //                         std::cout << "\n";
-        //                 }
-        //         }
-        // }
 
         // ============================================================
         // 3. Scatter queries from master to first row of workers
@@ -242,40 +203,10 @@ void Engine::KNN(Params &p, std::vector<DataPoint> &dataset,
                                 MPI_DOUBLE, 0, row_comm);
         }
 
-        // // print queries
-        // for (int r=0; r<size; r++) {
-        //         MPI_Barrier(MPI_COMM_WORLD);
-        //         if (rank == r) {
-        //                 std::cout << "Queries received by rank " << rank << ":\n";
-        //                 for (int i = 0; i < q_recvcount; i++) {
-        //                         std::cout << "ID: " << query_id_recv_buf[i] << ", k: " << query_k_recv_buf[i] << ", Attrs: ";
-        //                         for (int a = 0; a < num_attrs; a++) {
-        //                                 std::cout << query_attr_recv_buf[i * num_attrs + a] << " ";
-        //                         }
-        //                         std::cout << "\n";
-        //                 }
-        //         }
-        // }
-
         // Broadcast queries from first row to OTHER ROWS
         MPI_Bcast(query_id_recv_buf.data(),    q_recvcount,         MPI_INT,    0, col_comm);
         MPI_Bcast(query_k_recv_buf.data(),     q_recvcount,         MPI_INT,    0, col_comm);
         MPI_Bcast(query_attr_recv_buf.data(),  q_recvcount*num_attrs, MPI_DOUBLE, 0, col_comm);
-
-        // // print queries
-        // for (int r=0; r<size; r++) {
-        //         MPI_Barrier(MPI_COMM_WORLD);
-        //         if (rank == r) {
-        //                 std::cout << "Queries received by rank " << rank << ":\n";
-        //                 for (int i = 0; i < q_recvcount; i++) {
-        //                         std::cout << "ID: " << query_id_recv_buf[i] << ", k: " << query_k_recv_buf[i] << ", Attrs: ";
-        //                         for (int a = 0; a < num_attrs; a++) {
-        //                                 std::cout << query_attr_recv_buf[i * num_attrs + a] << " ";
-        //                         }
-        //                         std::cout << "\n";
-        //                 }
-        //         }
-        // }
 
         // ============================================================
         // 4. Define tuple type for (distance, label, id)
@@ -325,20 +256,6 @@ void Engine::KNN(Params &p, std::vector<DataPoint> &dataset,
                 local_result.resize(query_k);
         }
 
-        // // print local_results
-        // for (int r=0; r<size; r++) {
-        //         MPI_Barrier(MPI_COMM_WORLD);
-        //         if (rank == r) {
-        //                 std::cout << "Local results from rank " << rank << ":\n";
-        //                 for (int qi = 0; qi < q_recvcount; qi++) {
-        //                         std::cout << " Query " << qi << ":\n";
-        //                         for (auto &tup : local_results[qi]) {
-        //                                 std::cout << "  Distance: " << tup.distance << ", Label: " << tup.label << ", ID: " << tup.id << "\n";
-        //                         }
-        //                 }
-        //         }
-        // }
-
         std::vector<tuple> local_results_flat;                          // index == sum_{j=0}^{qi-1} k_j + ki
         std::vector<int> query_k(q_recvcount);
         for (int qi = 0; qi < q_recvcount; qi++) {
@@ -349,18 +266,6 @@ void Engine::KNN(Params &p, std::vector<DataPoint> &dataset,
                         local_results[qi].end()
                 );
         }
-
-        // // print flat local results
-        // for (int r=0; r<size; r++) {
-        //         MPI_Barrier(MPI_COMM_WORLD);
-        //         if (rank == r) {
-        //                 std::cout << "Flat local results from rank " << rank << ":\n";
-        //                 for (size_t i = 0; i < local_results_flat.size(); i++) {
-        //                         auto &tup = local_results_flat[i];
-        //                         std::cout << "Distance: " << tup.distance << ", Label: " << tup.label << ", ID: " << tup.id << "\n";
-        //                 }
-        //         }
-        // }
 
         // ============================================================
         // 6. Gather all flat local results to first row
