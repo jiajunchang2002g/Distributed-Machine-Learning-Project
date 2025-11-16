@@ -61,7 +61,7 @@ void Engine::KNN(Params &p, std::vector<DataPoint> &dataset,
         // ============================================================
         int dp_remainder = num_data % dims[0];
         int dp_recvcount = num_data / dims[0] + (row == 0 ? dp_remainder : 0);  // root and its row handle remainder
-        
+
         std::vector<int>    dp_id_recv_buf(dp_recvcount);
         std::vector<int>    dp_label_recv_buf(dp_recvcount);
         std::vector<double> dp_attr_recv_buf(dp_recvcount * num_attrs);         // index == dpi * num_attrs
@@ -297,6 +297,14 @@ void Engine::KNN(Params &p, std::vector<DataPoint> &dataset,
                                         gathered_result.push_back(res_recvbuffer[offset + ki]);
                                 }
                         }
+                        std::nth_element(gathered_result.begin(), gathered_result.begin() + query_k[qi],
+                                     gathered_result.end(), [](const tuple &a, const tuple &b) {
+                                           if (a.distance == b.distance) {
+                                                 return a.label > b.label; // larger label first
+                                           }
+                                           return a.distance < b.distance; // smaller distance first
+                                     });
+                        gathered_result.resize(query_k[qi]);
                 }
         }
 
