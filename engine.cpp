@@ -249,20 +249,20 @@ void Engine::KNN(Params &p, std::vector<DataPoint> &dataset,
         MPI_Bcast(query_k_recv_buf.data(),     q_recvcount,         MPI_INT,    0, col_comm);
         MPI_Bcast(query_attr_recv_buf.data(),  q_recvcount*num_attrs, MPI_DOUBLE, 0, col_comm);
 
-        // // print queries
-        // for (int r=0; r<size; r++) {
-        //         MPI_Barrier(MPI_COMM_WORLD);
-        //         if (rank == r) {
-        //                 std::cout << "Queries received by rank " << rank << ":\n";
-        //                 for (int i = 0; i < q_recvcount; i++) {
-        //                         std::cout << "ID: " << query_id_recv_buf[i] << ", k: " << query_k_recv_buf[i] << ", Attrs: ";
-        //                         for (int a = 0; a < num_attrs; a++) {
-        //                                 std::cout << query_attr_recv_buf[i * num_attrs + a] << " ";
-        //                         }
-        //                         std::cout << "\n";
-        //                 }
-        //         }
-        // }
+        // print queries
+        for (int r=0; r<size; r++) {
+                MPI_Barrier(MPI_COMM_WORLD);
+                if (rank == r) {
+                        std::cout << "Queries received by rank " << rank << ":\n";
+                        for (int i = 0; i < q_recvcount; i++) {
+                                std::cout << "ID: " << query_id_recv_buf[i] << ", k: " << query_k_recv_buf[i] << ", Attrs: ";
+                                for (int a = 0; a < num_attrs; a++) {
+                                        std::cout << query_attr_recv_buf[i * num_attrs + a] << " ";
+                                }
+                                std::cout << "\n";
+                        }
+                }
+        }
 
         // ============================================================
         // 4. Define tuple type for (distance, label, id)
@@ -326,30 +326,31 @@ void Engine::KNN(Params &p, std::vector<DataPoint> &dataset,
         // 6. Gather all flat local results to first row
         // ============================================================
         int res_sendcount = local_results_flat.size();
-        int res_recvcount = local_results_flat.size() * dims[0];
+        int res_recvcount = local_results_flat.size() * dims[1];
         MPI_Reduce(&res_sendcount, &res_recvcount, 1, MPI_INT,
                         MPI_SUM, 0, col_comm);
         
-        if (row == 0) {
+        // FIRST ROW ONLY gather results
+        if (col == 0) {
                 std::vector<int> res_recvbuffer(res_recvcount);
-                std::vector<int> res_recvcounts(dims[0], res_sendcount);
-                std::vector<int> res_displs(dims[0]);
+                std::vector<int> res_recvcounts(dims[1], res_sendcount);
+                std::vector<int> res_displs(dims[1]);
                 res_displs[0] = 0;
-                for (int i = 1; i < dims[0]; i++)
+                for (int i = 1; i < dims[1]; i++)
                         res_displs[i] = res_displs[i-1] + res_recvcounts[i-1];
-                
 
                 res_recvbuffer.resize(0);
                 MPI_Gatherv(local_results_flat.data(),
                                 local_results_flat.size(),
                                 tuple_type,
                                 res_recvbuffer.data(),
-                                nullptr,
-                                nullptr,
+                                res_recvcounts.data(),
+                                res_displs.data(),
                                 tuple_type,
                                 0,
                                 col_comm); 
         } 
+        // OTHER ROWS send results
         else {
                 MPI_Gatherv(local_results_flat.data(),
                                 local_results_flat.size(),
@@ -361,7 +362,6 @@ void Engine::KNN(Params &p, std::vector<DataPoint> &dataset,
                                 0,
                                 col_comm); 
         }
-
 
         // ============================================================
         // 6b. First row : assemble per-query gathered results
