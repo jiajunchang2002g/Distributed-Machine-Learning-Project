@@ -1,5 +1,4 @@
 #include "engine.h"
-
 #include <mpi.h>
 
 #include <algorithm>
@@ -46,22 +45,31 @@ void Engine::KNN(Params &p, std::vector<DataPoint> &dataset,
 
         int coords[2];
         MPI_Cart_coords(cart, rank, 2, coords);
-        int row = coords[0];
-        int col = coords[1];
+        int row = coords[0];    
+        int col = coords[1];    
 
         // Create row/column communicators
-        int row_dims[2] = {true, false};  // keep row fixed
-        int col_dims[2] = {false, true};  // keep col fixed
+        int row_dims[2] = {false, true};  // fix row 
+        int col_dims[2] = {true, false};  // fix column
 
         MPI_Comm row_comm, col_comm;
-        MPI_Cart_sub(cart, row_dims, &row_comm);
-        MPI_Cart_sub(cart, col_dims, &col_comm);  
+        MPI_Cart_sub(cart, row_dims, &row_comm);        // ranks have same row: same datapoints, different queries
+        MPI_Cart_sub(cart, col_dims, &col_comm);        // ranks have same column: same queries, different datapoints
 
         // ============================================================
         // 2. Scatter datapoints from master to first column of workers
         // ============================================================
         int dp_remainder = num_data % dims[0];
-        int dp_recvcount = num_data / dims[0] + (row == 0 ? dp_remainder : 0);  // root handles remainder
+        int dp_recvcount = num_data / dims[0] + (row == 0 ? dp_remainder : 0);  // root and its row handle remainder
+
+        // print dp_recvcount
+        for (int r=0; r<size; r++) {
+                MPI_Barrier(MPI_COMM_WORLD);
+                if (rank == r) {
+                        std::cout << "Rank " << rank << " (row " << row << ", col " << col << ") will receive "
+                                  << dp_recvcount << " datapoints.\n";
+                }
+        }
 
         std::vector<int>    dp_id_recv_buf(dp_recvcount);
         std::vector<int>    dp_label_recv_buf(dp_recvcount);
@@ -110,7 +118,7 @@ void Engine::KNN(Params &p, std::vector<DataPoint> &dataset,
         } 
 
         // FIRST COL receive from MASTER
-        else if (row == 0) {
+        else if (col == 0) {
                 MPI_Gather(&dp_recvcount, 1, MPI_INT, nullptr, 1, nullptr, 0, col_comm);
 
                 MPI_Scatterv(nullptr, nullptr, nullptr,
@@ -126,40 +134,40 @@ void Engine::KNN(Params &p, std::vector<DataPoint> &dataset,
                                 MPI_DOUBLE, 0, col_comm);
         }
 
-        // // print datapoints
-        // for (int r=0; r<size; r++) {
-        //         MPI_Barrier(MPI_COMM_WORLD);
-        //         if (rank == r) {
-        //                 std::cout << "Datapoints received by rank " << rank << ":\n";
-        //                 for (int i = 0; i < dp_recvcount; i++) {
-        //                         std::cout << "ID: " << dp_id_recv_buf[i] << ", Label: " << dp_label_recv_buf[i] << ", Attrs: ";
-        //                         for (int a = 0; a < num_attrs; a++) {
-        //                                 std::cout << dp_attr_recv_buf[i * num_attrs + a] << " ";
-        //                         }
-        //                         std::cout << "\n";
-        //                 }
-        //         }
-        // }
+        // print datapoints
+        for (int r=0; r<size; r++) {
+                MPI_Barrier(MPI_COMM_WORLD);
+                if (rank == r) {
+                        std::cout << "Datapoints received by rank " << rank << ":\n";
+                        for (int i = 0; i < dp_recvcount; i++) {
+                                std::cout << "ID: " << dp_id_recv_buf[i] << ", Label: " << dp_label_recv_buf[i] << ", Attrs: ";
+                                for (int a = 0; a < num_attrs; a++) {
+                                        std::cout << dp_attr_recv_buf[i * num_attrs + a] << " ";
+                                }
+                                std::cout << "\n";
+                        }
+                }
+        }
 
-        // FIRST COL broadcast to OTHER COLS
+        // // FIRST COL broadcast to OTHER COLS
         MPI_Bcast(dp_id_recv_buf.data(), dp_recvcount, MPI_INT, 0, row_comm);
         MPI_Bcast(dp_label_recv_buf.data(), dp_recvcount, MPI_INT, 0, row_comm);
         MPI_Bcast(dp_attr_recv_buf.data(), dp_recvcount * num_attrs, MPI_DOUBLE, 0, row_comm);
 
-        // // print datapoints
-        // for (int r=0; r<size; r++) {
-        //         MPI_Barrier(MPI_COMM_WORLD);
-        //         if (rank == r) {
-        //                 std::cout << "Datapoints received by rank " << rank << ":\n";
-        //                 for (int i = 0; i < dp_recvcount; i++) {
-        //                         std::cout << "ID: " << dp_id_recv_buf[i] << ", Label: " << dp_label_recv_buf[i] << ", Attrs: ";
-        //                         for (int a = 0; a < num_attrs; a++) {
-        //                                 std::cout << dp_attr_recv_buf[i * num_attrs + a] << " ";
-        //                         }
-        //                         std::cout << "\n";
-        //                 }
-        //         }
-        // }
+        // print datapoints
+        for (int r=0; r<size; r++) {
+                MPI_Barrier(MPI_COMM_WORLD);
+                if (rank == r) {
+                        std::cout << "Datapoints received by rank " << rank << ":\n";
+                        for (int i = 0; i < dp_recvcount; i++) {
+                                std::cout << "ID: " << dp_id_recv_buf[i] << ", Label: " << dp_label_recv_buf[i] << ", Attrs: ";
+                                for (int a = 0; a < num_attrs; a++) {
+                                        std::cout << dp_attr_recv_buf[i * num_attrs + a] << " ";
+                                }
+                                std::cout << "\n";
+                        }
+                }
+        }
 
         // ============================================================
         // 3. Scatter queries from master to first row of workers
@@ -218,7 +226,7 @@ void Engine::KNN(Params &p, std::vector<DataPoint> &dataset,
                                 MPI_DOUBLE, 0, row_comm);
         }
         // First row ONLY receive 
-        else if (col == 0) {
+        else if (row == 0) {
                 MPI_Gather(&q_recvcount, 1, MPI_INT, nullptr, 1, nullptr, 0, row_comm);
 
                 MPI_Scatterv(nullptr, nullptr, nullptr,
@@ -234,20 +242,20 @@ void Engine::KNN(Params &p, std::vector<DataPoint> &dataset,
                                 MPI_DOUBLE, 0, row_comm);
         }
 
-        // // print queries
-        // for (int r=0; r<size; r++) {
-        //         MPI_Barrier(MPI_COMM_WORLD);
-        //         if (rank == r) {
-        //                 std::cout << "Queries received by rank " << rank << ":\n";
-        //                 for (int i = 0; i < q_recvcount; i++) {
-        //                         std::cout << "ID: " << query_id_recv_buf[i] << ", k: " << query_k_recv_buf[i] << ", Attrs: ";
-        //                         for (int a = 0; a < num_attrs; a++) {
-        //                                 std::cout << query_attr_recv_buf[i * num_attrs + a] << " ";
-        //                         }
-        //                         std::cout << "\n";
-        //                 }
-        //         }
-        // }
+        // print queries
+        for (int r=0; r<size; r++) {
+                MPI_Barrier(MPI_COMM_WORLD);
+                if (rank == r) {
+                        std::cout << "Queries received by rank " << rank << ":\n";
+                        for (int i = 0; i < q_recvcount; i++) {
+                                std::cout << "ID: " << query_id_recv_buf[i] << ", k: " << query_k_recv_buf[i] << ", Attrs: ";
+                                for (int a = 0; a < num_attrs; a++) {
+                                        std::cout << query_attr_recv_buf[i * num_attrs + a] << " ";
+                                }
+                                std::cout << "\n";
+                        }
+                }
+        }
 
         // Broadcast queries from first row to OTHER ROWS
         MPI_Bcast(query_id_recv_buf.data(),    q_recvcount,         MPI_INT,    0, col_comm);

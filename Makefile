@@ -8,9 +8,9 @@ all: engine engine.debug
 clean:
 	rm -rf engine engine.debug
 
-engine: engine.cpp common.cpp utils.h
+engine: engine.cpp common.cpp 
 	${CPP} ${CPPFLAGS} $^ -o $@
 
-engine.debug: engine.cpp common.cpp utils.h
+engine.debug: engine.cpp common.cpp 
 	${CPP} ${CPPFLAGS} -g -DDEBUG $^ -o $@
 
