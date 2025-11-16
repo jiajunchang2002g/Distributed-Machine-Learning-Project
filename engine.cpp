@@ -367,7 +367,7 @@ void Engine::KNN(Params &p, std::vector<DataPoint> &dataset,
         // ============================================================
         int res_sendcount = local_results_flat.size(); // single send, unique to each col
         int res_recvcount = local_results_flat.size(); // single recv, unique to each col
-        int res_recv_buf_size = local_results_flat.size() * dims[1]; // first row gathers from all cols
+        int res_recv_buf_size = local_results_flat.size() * dims[1]; // dims[1] == num cols
         std::vector<tuple> res_recvbuffer;
 
         // Gather results among ranks with same query shard at first row
@@ -381,35 +381,57 @@ void Engine::KNN(Params &p, std::vector<DataPoint> &dataset,
         // ============================================================
         // 6b. First row : assemble per-query gathered results
         // ============================================================
-
+        std::vector<std::vector<tuple>> gathered_results;
+        if (row == 0) {
+                gathered_results.resize(q_recvcount);
+                for (int qi = 0; qi < q_recvcount; qi++) {
+                        std::vector<tuple> &gathered_result = gathered_results[qi];
+                        for (int c = 0; c < dims[1]; c++) {
+                                int offset = c * res_recvcount + qi * query_k[qi];
+                                for (int ki = 0; ki < query_k[qi]; ki++) {
+                                        gathered_result.push_back(res_recvbuffer[offset + ki]);
+                                }
+                        }
+                }
+        }
 
         // ============================================================
         // 7. First row process results and report one by one
         // ============================================================
-        // if (row == 0) {
-        //         for (int qi = 0; qi < num_queries; qi++) {
-        //                 auto &res = gathered_results[qi];
-        //                 // vote
-        //                 std::unordered_map<int, int> label_count;
-        //                 for (auto &tup : res) label_count[tup.label]++;
-        //                 int max_count = 0, predicted_label = -1;
-        //                 for (auto &lc : label_count) {
-        //                         if (lc.second > max_count || (lc.second == max_count && lc.first > predicted_label)) {
-        //                                 max_count = lc.second;
-        //                                 predicted_label = lc.first;
-        //                         }
-        //                 }
-        //                 // sort by distance then ID
-        //                 std::sort(res.begin(), res.end(),
-        //                                 [](const tuple &a, const tuple &b){
-        //                                 if (a.distance == b.distance) return a.id > b.id;
-        //                                 return a.distance < b.distance;
-        //                                 });
-        //                 // convert to (distance, label)
-        //                 std::vector<std::pair<double,int>> res_pairs;
-        //                 for (auto &tup : res) res_pairs.emplace_back(tup.distance, tup.label);
-        //                 reportResult(queries[qi], res_pairs, predicted_label);
-        //         }
-        // }
-
+        for (int r=0; r<size; r++) {
+                MPI_Barrier(MPI_COMM_WORLD);
+                if (row == 0) {
+                        for (int qi = 0; qi < q_recvcount; qi++) {
+                                auto &res = gathered_results[qi];
+                                // vote
+                                std::unordered_map<int, int> label_count;
+                                for (auto &tup : res) label_count[tup.label]++;
+                                int max_count = 0, predicted_label = -1;
+                                for (auto &lc : label_count) {
+                                        if (lc.second > max_count || (lc.second == max_count && lc.first > predicted_label)) {
+                                                max_count = lc.second;
+                                                predicted_label = lc.first;
+                                        }
+                                }
+                                // sort by distance then ID
+                                std::sort(res.begin(), res.end(),
+                                                [](const tuple &a, const tuple &b){
+                                                if (a.distance == b.distance) return a.id > b.id;
+                                                return a.distance < b.distance;
+                                                });
+                                // convert to (distance, label)
+                                std::vector<std::pair<double,int>> res_pairs;
+                                for (auto &tup : res) res_pairs.emplace_back(tup.distance, tup.label);
+                                // make query
+                                Query query = {
+                                        query_id_recv_buf[qi],
+                                        query_k_recv_buf[qi],
+                                        std::vector<double>( &query_attr_recv_buf[qi * num_attrs],
+                                                        &query_attr_recv_buf[(qi+1) * num_attrs] )
+                                };
+                                reportResult(query, res_pairs, predicted_label);
+                        }
+                }
+        }
 }
+
