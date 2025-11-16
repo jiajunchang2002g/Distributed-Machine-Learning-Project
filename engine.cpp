@@ -318,23 +318,25 @@ void Engine::KNN(Params &p, std::vector<DataPoint> &dataset,
                                 auto &res = gathered_results[qi];
                                 // vote
                                 std::unordered_map<int, int> label_count;
-                                for (auto &tup : res) label_count[tup.label]++;
+                                std::vector<std::pair<double,int>> res_pairs;
+                                for (auto &tup : res) {
+                                        res_pairs.emplace_back(tup.distance, tup.id);
+                                        label_count[tup.label]++;
+                                }
                                 int max_count = 0, predicted_label = -1;
-                                for (auto &lc : label_count) {
-                                        if (lc.second > max_count || (lc.second == max_count && lc.first > predicted_label)) {
-                                                max_count = lc.second;
-                                                predicted_label = lc.first;
+                                for (auto &pair : label_count) {
+                                        if (pair.second > max_count || (pair.second == max_count && pair.first > predicted_label)) {
+                                                max_count = pair.second;
+                                                predicted_label = pair.first;
                                         }
                                 }
                                 // sort by distance then ID
-                                std::sort(res.begin(), res.end(),
-                                                [](const tuple &a, const tuple &b){
-                                                if (a.distance == b.distance) return a.id > b.id;
-                                                return a.distance < b.distance;
+                                std::sort(res_pairs.begin(), res_pairs.end(),
+                                                [](const std::pair<double,int> &a, const std::pair<double,int> &b){
+                                                if (a.first == b.first) return a.second > b.second;
+                                                return a.first < b.first;
                                                 });
-                                // convert to (distance, label)
-                                std::vector<std::pair<double,int>> res_pairs;
-                                for (auto &tup : res) res_pairs.emplace_back(tup.distance, tup.label);
+
                                 // make query
                                 Query query = {
                                         query_id_recv_buf[qi],
