@@ -1,5 +1,4 @@
 #include "engine.h"
-#include "utils.h"
 
 #include <mpi.h>
 
@@ -96,10 +95,16 @@ void Engine::KNN(Params &p, std::vector<DataPoint> &dataset,
                 for (int i = 0; i < num_data; i++)
                         for (int a = 0; a < num_attrs; a++)
                                 all_attrs[i * num_attrs + a] = dataset[i].attrs[a];
-                std::vector<int> attr_sc(dims[0]), attr_disp(dims[0]);
-                build_sendcounts_displs_attrs(dp_sendcounts, num_attrs,
-                                attr_sc, attr_disp);
-                MPI_Scatterv(all_attrs.data(), attr_sc.data(), attr_disp.data(),
+                std::vector<int> attr_sendcounts(dims[0]), attr_displs(dims[0]);
+                for (int i = 0; i < dims[0]; i++) {
+                        attr_sendcounts[i]   = dp_sendcounts[i] * num_attrs;
+                }
+                attr_displs[0] = 0;
+                for (int i = 1; i < dims[0]; i++) {
+                        attr_displs[i] = attr_displs[i-1] + attr_sendcounts[i-1];
+                }
+                
+                MPI_Scatterv(all_attrs.data(), attr_sendcounts.data(), attr_displs.data(),
                                 MPI_DOUBLE, dp_attr_recv_buf.data(), dp_recvcount*num_attrs,
                                 MPI_DOUBLE, 0, col_comm);
         } 
@@ -137,9 +142,9 @@ void Engine::KNN(Params &p, std::vector<DataPoint> &dataset,
         // }
 
         // FIRST COL broadcast to OTHER COLS
-        MPI_Bcast(dp_id_recv_buf.data(),    dp_recvcount,         MPI_INT,    0, row_comm);
-        MPI_Bcast(dp_label_recv_buf.data(), dp_recvcount,         MPI_INT,    0, row_comm);
-        MPI_Bcast(dp_attr_recv_buf.data(),  dp_recvcount*num_attrs, MPI_DOUBLE, 0, row_comm);
+        MPI_Bcast(dp_id_recv_buf.data(), dp_recvcount, MPI_INT, 0, row_comm);
+        MPI_Bcast(dp_label_recv_buf.data(), dp_recvcount, MPI_INT, 0, row_comm);
+        MPI_Bcast(dp_attr_recv_buf.data(), dp_recvcount * num_attrs, MPI_DOUBLE, 0, row_comm);
 
         // // print datapoints
         // for (int r=0; r<size; r++) {
@@ -286,82 +291,92 @@ void Engine::KNN(Params &p, std::vector<DataPoint> &dataset,
         // ============================================================
         // 5. Local computation 
         // ============================================================
-        std::vector<std::vector<tuple>> local_results(q_recvcount);
+        // std::vector<std::vector<tuple>> local_results(q_recvcount);
 
-        for (int qi = 0; qi < q_recvcount; qi++) {
+        // for (int qi = 0; qi < q_recvcount; qi++) {
 
-                std::vector<tuple> &local_result = local_results[qi];
-                int query_k = query_k_recv_buf.at(qi);
-                for (int dp = 0; dp < dp_recvcount; dp++) {
-                        double dist = computeDistance(
-                                        &query_attr_recv_buf[qi * num_attrs],
-                                        &dp_attr_recv_buf[dp * num_attrs],
-                                        num_attrs
-                                        );
-                        local_result.push_back({dist, dp_label_recv_buf.at(dp), dp_id_recv_buf.at(dp)});
-                }
+        //         std::vector<tuple> &local_result = local_results[qi];
+        //         int query_k = query_k_recv_buf.at(qi);
+        //         for (int dp = 0; dp < dp_recvcount; dp++) {
+        //                 double dist = computeDistance(
+        //                                 &query_attr_recv_buf[qi * num_attrs],
+        //                                 &dp_attr_recv_buf[dp * num_attrs],
+        //                                 num_attrs
+        //                                 );
+        //                 local_result.push_back({dist, dp_label_recv_buf.at(dp), dp_id_recv_buf.at(dp)});
+        //         }
 
-                // keep only top-k closest
-                std::nth_element(local_result.begin(), local_result.begin() + query_k,
-                             local_result.end(), [](const tuple &a, const tuple &b) {
-                                   if (a.distance == b.distance) {
-                                         return a.label > b.label; // larger label first
-                                   }
-                                   return a.distance < b.distance; // smaller distance first
-                             });
-                local_result.resize(query_k);
-        }
+        //         // keep only top-k closest
+        //         std::nth_element(local_result.begin(), local_result.begin() + query_k,
+        //                      local_result.end(), [](const tuple &a, const tuple &b) {
+        //                            if (a.distance == b.distance) {
+        //                                  return a.label > b.label; // larger label first
+        //                            }
+        //                            return a.distance < b.distance; // smaller distance first
+        //                      });
+        //         local_result.resize(query_k);
+        // }
 
-        std::vector<tuple> local_results_flat;                          // index == sum_{j=0}^{qi-1} k_j + ki
-        std::vector<int> query_k(q_recvcount);
-        for (int qi = 0; qi < q_recvcount; qi++) {
-                int k = local_results[qi].size(); 
-                query_k[qi] = k;
-                local_results_flat.insert(local_results_flat.end(),
-                                local_results[qi].begin(),
-                                local_results[qi].end());
-        }
+        // std::vector<tuple> local_results_flat;                          // index == sum_{j=0}^{qi-1} k_j + ki
+        // std::vector<int> query_k(q_recvcount);
+        // for (int qi = 0; qi < q_recvcount; qi++) {
+        //         int k = local_results[qi].size(); 
+        //         query_k[qi] = k;
+        //         local_results_flat.insert(local_results_flat.end(),
+        //                         local_results[qi].begin(),
+        //                         local_results[qi].end());
+        // }
 
         // ============================================================
         // 6. Gather all flat local results to first row
         // ============================================================
-        int res_sendcount = local_results_flat.size();
-        int res_recvcount = local_results_flat.size() * dims[1];
-        MPI_Reduce(&res_sendcount, &res_recvcount, 1, MPI_INT,
-                        MPI_SUM, 0, col_comm);
+        // int res_sendcount = local_results_flat.size();
+        // for (int r = 0; r < size; r++) {
+        //         MPI_Barrier(MPI_COMM_WORLD);
+        //         if (rank == r) {
+        //                 std::cout << "Local results from rank " << rank << " (count=" << res_sendcount << "):\n";
+        //         }
+        // }
+        // int res_recvcount = local_results_flat.size() * dims[1];
+        // MPI_Reduce(&res_sendcount, &res_recvcount, 1, MPI_INT,
+        //                 MPI_SUM, 0, col_comm);
         
-        // FIRST ROW ONLY gather results
-        if (col == 0) {
-                std::vector<int> res_recvbuffer(res_recvcount);
-                std::vector<int> res_recvcounts(dims[1], res_sendcount);
-                std::vector<int> res_displs(dims[1]);
-                res_displs[0] = 0;
-                for (int i = 1; i < dims[1]; i++)
-                        res_displs[i] = res_displs[i-1] + res_recvcounts[i-1];
+        // // FIRST ROW ONLY gather results
+        // if (col == 0) {
+        //         // std::vector<int> res_recvbuffer(res_recvcount);
+        //         // std::vector<int> res_recvcounts(dims[1], res_sendcount);
+        //         // MPI_Gather(&res_sendcount, 1, MPI_INT,
+        //         //                 res_recvcounts.data(), 1, MPI_INT,
+        //         //                 0, col_comm);
 
-                res_recvbuffer.resize(0);
-                MPI_Gatherv(local_results_flat.data(),
-                                local_results_flat.size(),
-                                tuple_type,
-                                res_recvbuffer.data(),
-                                res_recvcounts.data(),
-                                res_displs.data(),
-                                tuple_type,
-                                0,
-                                col_comm); 
-        } 
-        // OTHER ROWS send results
-        else {
-                MPI_Gatherv(local_results_flat.data(),
-                                local_results_flat.size(),
-                                tuple_type,
-                                nullptr,
-                                nullptr,
-                                nullptr,
-                                tuple_type,
-                                0,
-                                col_comm); 
-        }
+        //         // std::vector<int> res_displs(dims[1]);
+        //         // res_displs[0] = 0;
+        //         // for (int i = 1; i < dims[1]; i++)
+        //         //         res_displs[i] = res_displs[i-1] + res_recvcounts[i-1];
+
+        //         // MPI_Gather(local_results_flat.data(),
+        //         //                 local_results_flat.size(),
+        //         //                 tuple_type,
+        //         //                 res_recvbuffer.data(),
+        //         //                 res_recvcount,
+        //         //                 tuple_type,
+        //         //                 0,
+        //         //                 col_comm); 
+        // } 
+        // // OTHER ROWS send results
+        // else {
+        //         // MPI_Gather(&res_sendcount, 1, MPI_INT,
+        //         //                 nullptr, 1, nullptr,
+        //         //                 0, col_comm);
+        //         // MPI_Gather(local_results_flat.data(),
+        //         //                 local_results_flat.size(),
+        //         //                 tuple_type,
+        //         //                 nullptr,
+        //         //                 0,
+        //         //                 tuple_type,
+        //         //                 0,
+        //         //                 col_comm);
+        // }
 
         // ============================================================
         // 6b. First row : assemble per-query gathered results
