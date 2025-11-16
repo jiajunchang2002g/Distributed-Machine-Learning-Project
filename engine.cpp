@@ -58,103 +58,103 @@ void Engine::KNN(Params &p, std::vector<DataPoint> &dataset,
         MPI_Cart_sub(cart, row_dims, &row_comm);
         MPI_Cart_sub(cart, col_dims, &col_comm);  
 
-        // // ============================================================
-        // // 2. Scatter datapoints from master to first column of workers
-        // // ============================================================
-        // int dp_remainder = num_data % dims[0];
-        // int dp_recvcount = num_data / dims[0] + (row == 0 ? dp_remainder : 0);  // root handles remainder
+        // ============================================================
+        // 2. Scatter datapoints from master to first column of workers
+        // ============================================================
+        int dp_remainder = num_data % dims[0];
+        int dp_recvcount = num_data / dims[0] + (row == 0 ? dp_remainder : 0);  // root handles remainder
 
-        // std::vector<int>    dp_id_recv_buf(dp_recvcount);
-        // std::vector<int>    dp_label_recv_buf(dp_recvcount);
-        // std::vector<double> dp_attr_recv_buf(dp_recvcount * num_attrs);
+        std::vector<int>    dp_id_recv_buf(dp_recvcount);
+        std::vector<int>    dp_label_recv_buf(dp_recvcount);
+        std::vector<double> dp_attr_recv_buf(dp_recvcount * num_attrs);
 
-        // // MASTER ONLY
-        // if (rank == 0) {
-        //         std::vector<int> sendcounts(dims[0]), displs(dims[0]);
+        // MASTER ONLY
+        if (rank == 0) {
+                std::vector<int> dp_sendcounts(dims[0]), dp_displs(dims[0]);
 
-        //         MPI_Gather(&dp_recvcount, 1, MPI_INT, sendcounts.data(), 1, MPI_INT, 0, col_comm);
-        //         displs[0] = 0;
-        //         for (int i = 1; i < dims[0]; i++)
-        //                 displs[i] = displs[i-1] + sendcounts[i-1];
+                MPI_Gather(&dp_recvcount, 1, MPI_INT, dp_sendcounts.data(), 1, MPI_INT, 0, col_comm);
+                dp_displs[0] = 0;
+                for (int i = 1; i < dims[0]; i++)
+                        dp_displs[i] = dp_displs[i-1] + dp_sendcounts[i-1];
 
-        //         // Scatter datapoint IDs
-        //         std::vector<int> dp_ids(num_data);
-        //         for (int i = 0; i < num_data; i++)
-        //                 dp_ids[i] = dataset[i].id;
-        //         MPI_Scatterv(dp_ids.data(), sendcounts.data(), displs.data(),
-        //                         MPI_INT, dp_id_recv_buf.data(), dp_recvcount, MPI_INT,
-        //                         0, col_comm);
-        //         // Scatter datapoint labels
-        //         std::vector<int> labels(num_data);
-        //         for (int i = 0; i < num_data; i++)
-        //                 labels[i] = dataset[i].label;
-        //         MPI_Scatterv(labels.data(), sendcounts.data(), displs.data(),
-        //                         MPI_INT, dp_label_recv_buf.data(), dp_recvcount, MPI_INT,
-        //                         0, col_comm);
-        //         // Scatter datapoint attributes
-        //         std::vector<double> all_attrs(num_data * num_attrs);
-        //         for (int i = 0; i < num_data; i++)
-        //                 for (int a = 0; a < num_attrs; a++)
-        //                         all_attrs[i * num_attrs + a] = dataset[i].attrs[a];
-        //         std::vector<int> attr_sc(dims[0]), attr_disp(dims[0]);
-        //         build_sendcounts_displs_attrs(sendcounts, num_attrs,
-        //                         attr_sc, attr_disp);
-        //         MPI_Scatterv(all_attrs.data(), attr_sc.data(), attr_disp.data(),
-        //                         MPI_DOUBLE, dp_attr_recv_buf.data(), dp_recvcount*num_attrs,
-        //                         MPI_DOUBLE, 0, col_comm);
-        // } 
+                // Scatter datapoint IDs
+                std::vector<int> dp_ids(num_data);
+                for (int i = 0; i < num_data; i++)
+                        dp_ids[i] = dataset[i].id;
+                MPI_Scatterv(dp_ids.data(), dp_sendcounts.data(), dp_displs.data(),
+                                MPI_INT, dp_id_recv_buf.data(), dp_recvcount, MPI_INT,
+                                0, col_comm);
+                // Scatter datapoint labels
+                std::vector<int> labels(num_data);
+                for (int i = 0; i < num_data; i++)
+                        labels[i] = dataset[i].label;
+                MPI_Scatterv(labels.data(), dp_sendcounts.data(), dp_displs.data(),
+                                MPI_INT, dp_label_recv_buf.data(), dp_recvcount, MPI_INT,
+                                0, col_comm);
+                // Scatter datapoint attributes
+                std::vector<double> all_attrs(num_data * num_attrs);
+                for (int i = 0; i < num_data; i++)
+                        for (int a = 0; a < num_attrs; a++)
+                                all_attrs[i * num_attrs + a] = dataset[i].attrs[a];
+                std::vector<int> attr_sc(dims[0]), attr_disp(dims[0]);
+                build_sendcounts_displs_attrs(dp_sendcounts, num_attrs,
+                                attr_sc, attr_disp);
+                MPI_Scatterv(all_attrs.data(), attr_sc.data(), attr_disp.data(),
+                                MPI_DOUBLE, dp_attr_recv_buf.data(), dp_recvcount*num_attrs,
+                                MPI_DOUBLE, 0, col_comm);
+        } 
 
-        // // FIRST COL receive from MASTER
-        // else if (row == 0) {
-        //         MPI_Gather(&dp_recvcount, 1, MPI_INT, nullptr, 1, nullptr, 0, col_comm);
+        // FIRST COL receive from MASTER
+        else if (row == 0) {
+                MPI_Gather(&dp_recvcount, 1, MPI_INT, nullptr, 1, nullptr, 0, col_comm);
                 
-        //         MPI_Scatterv(nullptr, nullptr, nullptr,
-        //                         MPI_INT, dp_id_recv_buf.data(), dp_recvcount, MPI_INT,
-        //                         0, col_comm);
+                MPI_Scatterv(nullptr, nullptr, nullptr,
+                                MPI_INT, dp_id_recv_buf.data(), dp_recvcount, MPI_INT,
+                                0, col_comm);
 
-        //         MPI_Scatterv(nullptr, nullptr, nullptr,
-        //                         MPI_INT, dp_label_recv_buf.data(), dp_recvcount, MPI_INT,
-        //                         0, col_comm);
+                MPI_Scatterv(nullptr, nullptr, nullptr,
+                                MPI_INT, dp_label_recv_buf.data(), dp_recvcount, MPI_INT,
+                                0, col_comm);
 
-        //         MPI_Scatterv(nullptr, nullptr, nullptr,
-        //                         MPI_DOUBLE, dp_attr_recv_buf.data(), dp_recvcount*num_attrs,
-        //                         MPI_DOUBLE, 0, col_comm);
-        // }
+                MPI_Scatterv(nullptr, nullptr, nullptr,
+                                MPI_DOUBLE, dp_attr_recv_buf.data(), dp_recvcount*num_attrs,
+                                MPI_DOUBLE, 0, col_comm);
+        }
 
-        // // print datapoints
-        // for (int r=0; r<size; r++) {
-        //         MPI_Barrier(MPI_COMM_WORLD);
-        //         if (rank == r) {
-        //                 std::cout << "Datapoints received by rank " << rank << ":\n";
-        //                 for (int i = 0; i < dp_recvcount; i++) {
-        //                         std::cout << "ID: " << dp_id_recv_buf[i] << ", Label: " << dp_label_recv_buf[i] << ", Attrs: ";
-        //                         for (int a = 0; a < num_attrs; a++) {
-        //                                 std::cout << dp_attr_recv_buf[i * num_attrs + a] << " ";
-        //                         }
-        //                         std::cout << "\n";
-        //                 }
-        //         }
-        // }
+        // print datapoints
+        for (int r=0; r<size; r++) {
+                MPI_Barrier(MPI_COMM_WORLD);
+                if (rank == r) {
+                        std::cout << "Datapoints received by rank " << rank << ":\n";
+                        for (int i = 0; i < dp_recvcount; i++) {
+                                std::cout << "ID: " << dp_id_recv_buf[i] << ", Label: " << dp_label_recv_buf[i] << ", Attrs: ";
+                                for (int a = 0; a < num_attrs; a++) {
+                                        std::cout << dp_attr_recv_buf[i * num_attrs + a] << " ";
+                                }
+                                std::cout << "\n";
+                        }
+                }
+        }
 
-        // // FIRST COL broadcast to OTHER COLS
-        // MPI_Bcast(dp_id_recv_buf.data(),    dp_recvcount,         MPI_INT,    0, row_comm);
-        // MPI_Bcast(dp_label_recv_buf.data(), dp_recvcount,         MPI_INT,    0, row_comm);
-        // MPI_Bcast(dp_attr_recv_buf.data(),  dp_recvcount*num_attrs, MPI_DOUBLE, 0, row_comm);
+        // FIRST COL broadcast to OTHER COLS
+        MPI_Bcast(dp_id_recv_buf.data(),    dp_recvcount,         MPI_INT,    0, row_comm);
+        MPI_Bcast(dp_label_recv_buf.data(), dp_recvcount,         MPI_INT,    0, row_comm);
+        MPI_Bcast(dp_attr_recv_buf.data(),  dp_recvcount*num_attrs, MPI_DOUBLE, 0, row_comm);
 
-        // // print datapoints
-        // for (int r=0; r<size; r++) {
-        //         MPI_Barrier(MPI_COMM_WORLD);
-        //         if (rank == r) {
-        //                 std::cout << "Datapoints received by rank " << rank << ":\n";
-        //                 for (int i = 0; i < dp_recvcount; i++) {
-        //                         std::cout << "ID: " << dp_id_recv_buf[i] << ", Label: " << dp_label_recv_buf[i] << ", Attrs: ";
-        //                         for (int a = 0; a < num_attrs; a++) {
-        //                                 std::cout << dp_attr_recv_buf[i * num_attrs + a] << " ";
-        //                         }
-        //                         std::cout << "\n";
-        //                 }
-        //         }
-        // }
+        // print datapoints
+        for (int r=0; r<size; r++) {
+                MPI_Barrier(MPI_COMM_WORLD);
+                if (rank == r) {
+                        std::cout << "Datapoints received by rank " << rank << ":\n";
+                        for (int i = 0; i < dp_recvcount; i++) {
+                                std::cout << "ID: " << dp_id_recv_buf[i] << ", Label: " << dp_label_recv_buf[i] << ", Attrs: ";
+                                for (int a = 0; a < num_attrs; a++) {
+                                        std::cout << dp_attr_recv_buf[i * num_attrs + a] << " ";
+                                }
+                                std::cout << "\n";
+                        }
+                }
+        }
 
         // ============================================================
         // 3. Scatter queries from master to first row of workers
@@ -170,8 +170,8 @@ void Engine::KNN(Params &p, std::vector<DataPoint> &dataset,
         if (rank == 0) {
                 std::vector<int> q_sendcounts(dims[1]), q_displs(dims[1]);
 
-                MPI_Gather(&q_recvcount, 1, MPI_INT,
-                                q_sendcounts.data(), 1, MPI_INT, 0, row_comm);
+                MPI_Gather(&q_recvcount, 1, MPI_INT, q_sendcounts.data(), 1, MPI_INT, 0, row_comm);
+
                 q_displs[0] = 0;
                 for (int i = 1; i < dims[1]; i++)
                         q_displs[i] = q_displs[i-1] + q_sendcounts[i-1];
@@ -196,7 +196,10 @@ void Engine::KNN(Params &p, std::vector<DataPoint> &dataset,
                 std::vector<int> q_attrs_sendcounts(dims[1]), q_attrs_disp(dims[1]);
                 for (int i = 0; i < dims[1]; i++) {
                         q_attrs_sendcounts[i]   = q_sendcounts[i] * num_attrs;
-                        q_attrs_disp[i] = q_displs[i] * num_attrs;
+                }
+                q_attrs_disp[0] = 0;
+                for (int i = 1; i < dims[1]; i++) {
+                        q_attrs_disp[i] = q_attrs_disp[i-1] + q_attrs_sendcounts[i-1];
                 }
 
                 // Scatter query attrs
